@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using RetroRPG.Core;
 using RetroRPG.Importers.GBA.Common;
 using RetroRPG.Importers.GBA.PokemonFireRed;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace RetroRPG.Editor
@@ -15,6 +17,7 @@ namespace RetroRPG.Editor
         private RomFile rom;
         private GbaHeader header;
         private GameDetectionResult detection;
+        private ImportReport inspectionReport;
         private string error;
         private Vector2 scroll;
 
@@ -60,6 +63,8 @@ namespace RetroRPG.Editor
                 DrawMetadata();
             }
 
+            DrawDiagnostics();
+
             EditorGUILayout.EndScrollView();
         }
 
@@ -85,6 +90,7 @@ namespace RetroRPG.Editor
             rom = null;
             header = null;
             detection = null;
+            inspectionReport = new ImportReport("ROM_INSPECTION");
 
             try
             {
@@ -95,10 +101,20 @@ namespace RetroRPG.Editor
                     new PokemonFireRedAdapter()
                 });
                 detection = detector.Detect(header, rom.Fingerprint);
+                inspectionReport.Add(new ParseDiagnostic(
+                    "Detection",
+                    detection.CanImport ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning,
+                    detection.Message));
             }
-            catch (Exception exception)
+            catch (RomReadException exception)
             {
-                error = exception.Message;
+                error = "The ROM could not be read within its available bounds.";
+                inspectionReport.Add(new ParseDiagnostic("ROM", DiagnosticSeverity.Error, error, exception.Offset, SafeLength(exception.RequestedLength)));
+            }
+            catch (Exception)
+            {
+                error = "The ROM could not be inspected. Check that it is a readable .gba file.";
+                inspectionReport.Add(new ParseDiagnostic("Inspection", DiagnosticSeverity.Error, error));
             }
         }
 
@@ -128,8 +144,45 @@ namespace RetroRPG.Editor
             {
                 if (GUILayout.Button("Import Pallet Town"))
                 {
-                    ImportPalletTown(path: selectedPath);
+                    ImportPalletTown(selectedPath);
                 }
+            }
+
+            if (System.IO.Directory.Exists(PalletTownAssetBuilder.GetOutputFolderAbsolutePath()))
+            {
+                DrawField("Output", PalletTownAssetBuilder.OutputRoot);
+                DrawField("Tile assets", PalletTownAssetBuilder.GetGeneratedTileAssetCount().ToString());
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Open Imported Folder"))
+                    {
+                        EditorUtility.RevealInFinder(PalletTownAssetBuilder.GetOutputFolderAbsolutePath());
+                    }
+
+                    if (GUILayout.Button("Open Pallet Town Scene"))
+                    {
+                        OpenImportedScene();
+                    }
+                }
+            }
+        }
+
+        private void DrawDiagnostics()
+        {
+            if (inspectionReport == null || inspectionReport.Diagnostics.Count == 0) return;
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Diagnostics", EditorStyles.boldLabel);
+            for (var i = 0; i < inspectionReport.Diagnostics.Count; i++)
+            {
+                var diagnostic = inspectionReport.Diagnostics[i];
+                var type = diagnostic.Severity == DiagnosticSeverity.Error
+                    ? MessageType.Error
+                    : diagnostic.Severity == DiagnosticSeverity.Warning ? MessageType.Warning : MessageType.Info;
+                var location = diagnostic.Offset.HasValue
+                    ? " (0x" + diagnostic.Offset.Value.ToString("X") + (diagnostic.Length.HasValue ? ", " + diagnostic.Length.Value + " bytes" : string.Empty) + ")"
+                    : string.Empty;
+                EditorGUILayout.HelpBox("[" + diagnostic.Stage + "/" + diagnostic.Category + "] " + diagnostic.Message + location, type);
             }
         }
 
@@ -142,13 +195,71 @@ namespace RetroRPG.Editor
             }
         }
 
-        private static void ImportPalletTown(string path)
+        private void ImportPalletTown(string path)
         {
-            EditorUtility.DisplayDialog(
-                "Pallet Town importer",
-                "The ROM is supported. The Pallet Town asset pipeline will run from this command once the MVP 1 builder is loaded.",
-                "OK");
+            try
+            {
+                // Reload the file: the selection snapshot must not be trusted after time has elapsed.
+                var snapshot = RomFile.Load(path);
+                var snapshotHeader = GbaHeaderParser.Parse(snapshot.CreateReader());
+                var snapshotDetection = new GameDetector(new List<IRomGameAdapter> { new PokemonFireRedAdapter() })
+                    .Detect(snapshotHeader, snapshot.Fingerprint);
+                if (!snapshotDetection.CanImport)
+                {
+                    inspectionReport = new ImportReport("ROM_INSPECTION");
+                    inspectionReport.Add(new ParseDiagnostic("Detection", DiagnosticSeverity.Error, snapshotDetection.Message));
+                    return;
+                }
+
+                var parsed = new PalletTownParser().Parse(snapshot);
+                inspectionReport = parsed.Report;
+                if (!parsed.Succeeded)
+                {
+                    return;
+                }
+
+                PalletTownAssetBuilder.Import(parsed.Map, parsed.Report, ShowImportProgress);
+                EditorUtility.DisplayDialog("Pallet Town importer", "Pallet Town assets and scene were generated successfully.", "OK");
+            }
+            catch (OperationCanceledException exception)
+            {
+                inspectionReport = new ImportReport("UNITY_IMPORT");
+                inspectionReport.Add(new ParseDiagnostic("Import", DiagnosticSeverity.Warning, exception.Message));
+            }
+            catch (RomReadException exception)
+            {
+                inspectionReport = new ImportReport("UNITY_IMPORT");
+                inspectionReport.Add(new ParseDiagnostic("ROM", DiagnosticSeverity.Error, "The selected ROM could not be read within its available bounds.", exception.Offset, SafeLength(exception.RequestedLength)));
+            }
+            catch (Exception)
+            {
+                inspectionReport = new ImportReport("UNITY_IMPORT");
+                inspectionReport.Add(new ParseDiagnostic("Import", DiagnosticSeverity.Error, "Pallet Town generation failed before completion. See the Inspector diagnostics after correcting the reported input."));
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+        }
+
+        private static int SafeLength(long requestedLength)
+        {
+            return requestedLength > int.MaxValue ? int.MaxValue : (int)Math.Max(0, requestedLength);
+        }
+
+        private static bool ShowImportProgress(string stage, float progress)
+        {
+            return EditorUtility.DisplayCancelableProgressBar("Import Pallet Town", stage, progress);
+        }
+
+        private static void OpenImportedScene()
+        {
+            const string scene = PalletTownAssetBuilder.OutputRoot + "/PalletTown.unity";
+            if (!System.IO.File.Exists(System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), scene))) return;
+            if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+            {
+                EditorSceneManager.OpenScene(scene, OpenSceneMode.Single);
+            }
         }
     }
 }
-

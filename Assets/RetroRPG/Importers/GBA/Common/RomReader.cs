@@ -11,7 +11,22 @@ namespace RetroRPG.Importers.GBA.Common
 
         public RomReader(byte[] data)
         {
-            this.data = data ?? throw new ArgumentNullException(nameof(data));
+            if (data == null)
+            {
+                throw new ArgumentNullException(nameof(data));
+            }
+
+            this.data = (byte[])data.Clone();
+        }
+
+        private RomReader(byte[] data, bool takeOwnership)
+        {
+            this.data = data;
+        }
+
+        internal static RomReader FromOwnedBuffer(byte[] data)
+        {
+            return new RomReader(data ?? throw new ArgumentNullException(nameof(data)), true);
         }
 
         public int Length => data.Length;
@@ -72,4 +87,3 @@ namespace RetroRPG.Importers.GBA.Common
         }
     }
 }
-

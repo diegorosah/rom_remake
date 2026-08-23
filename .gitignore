@@ -1,6 +1,7 @@
 # User-owned ROMs and extracted proprietary content
 /POKEMON_FIRERED_ROM/
 /Assets/Imported/
+/Assets/Imported.meta
 /LocalRoms/
 *.gba
 *.nds
@@ -39,4 +40,3 @@ crashlytics-build.properties
 .DS_Store
 Thumbs.db
 Desktop.ini
-

@@ -1,7 +1,7 @@
 {
   "name": "RetroRPG.Runtime",
   "rootNamespace": "RetroRPG.Runtime",
-  "references": ["RetroRPG.Core", "RetroRPG.IR", "RetroRPG.Unity"],
+  "references": ["RetroRPG.Core", "RetroRPG.Unity"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
@@ -12,4 +12,3 @@
   "versionDefines": [],
   "noEngineReferences": false
 }
-

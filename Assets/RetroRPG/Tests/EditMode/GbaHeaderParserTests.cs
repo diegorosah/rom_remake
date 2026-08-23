@@ -26,6 +26,17 @@ namespace RetroRPG.Tests.EditMode
                 GbaHeaderParser.Parse(new RomReader(new byte[GbaHeaderParser.HeaderLength - 1])));
         }
 
+        [Test]
+        public void ReportsInvalidComplementChecksum()
+        {
+            var bytes = BuildHeader("POKEMON FIRE", "BPRE", "01", 1);
+            bytes[0xBD] ^= 0xFF;
+
+            var header = GbaHeaderParser.Parse(new RomReader(bytes));
+
+            Assert.That(header.HasValidComplementCheck, Is.False);
+        }
+
         internal static byte[] BuildHeader(string title, string gameCode, string makerCode, byte version)
         {
             var bytes = new byte[GbaHeaderParser.HeaderLength];
@@ -52,4 +63,3 @@ namespace RetroRPG.Tests.EditMode
         }
     }
 }
-

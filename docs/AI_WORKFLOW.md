@@ -40,6 +40,19 @@ read-only architecture task and one independent read-only investigation. Confirm
 the main thread receives both summaries. Project-scoped `.codex/config.toml` is loaded
 only after the project is trusted.
 
+### Validation evidence (2026-08-23)
+
+- The repository instructions and all five repo-scoped skills were discovered in a
+  fresh session rooted at `D:\rom_remake`; each skill passed its structural validator.
+- The configured read-only `rom_analyst` returned the independently verified FireRed
+  rev1 Pallet Town layout/tileset/animation specification to the main thread.
+- The configured read-only `rrpg_architect` returned an architecture gate review to
+  the main thread, including actionable package, immutability, diagnostics, and test
+  findings.
+- Writer concurrency was kept to one parser writer and one Unity/Editor writer, with
+  non-overlapping ownership. Sequential fallback and all delivery gates remain in
+  force when custom agents are unavailable.
+
 ## Proprietary data
 
 ROMs remain user-owned local inputs. Paths are stored only in machine-local Editor

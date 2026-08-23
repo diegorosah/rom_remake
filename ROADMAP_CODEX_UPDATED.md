@@ -340,7 +340,7 @@ Usar para:
 Configuração recomendada:
 
 ```text
-Modelo: gpt-5.6
+Modelo: gpt-5.6-sol
 Reasoning padrão: high
 Reasoning para arquitetura/reverse engineering: xhigh
 Escalonamento excepcional: max/ultra quando suportado pelo cliente e a tarefa justificar
@@ -458,14 +458,14 @@ Responsável por planejamento, arquitetura e decisões que afetam múltiplas cam
 ```toml
 name = "rrpg_architect"
 description = "Architect and planner for RetroRPG. Use for MVP planning, IR contracts, architecture decisions, hard debugging and cross-layer design."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
 developer_instructions = '''
 Operate as the technical architect of RetroRPG.
 
-Read ROADMAP_CODEX.md and the applicable AGENTS.md files before making recommendations.
+Read ROADMAP_CODEX_UPDATED.md and the applicable AGENTS.md files before making recommendations.
 
 Do not implement code.
 
@@ -490,7 +490,7 @@ Responsável pelo reverse engineering e pela investigação de estruturas da ROM
 ```toml
 name = "rom_analyst"
 description = "Read-only GBA ROM reverse-engineering specialist. Use to investigate binary layouts, pointers, offsets, maps, palettes, tiles, events and FireRed-specific structures before parser implementation."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 
@@ -600,7 +600,7 @@ sandbox_mode = "workspace-write"
 developer_instructions = '''
 Update documentation only from verified implementation state or explicit architectural decisions.
 
-Keep ROADMAP_CODEX.md, ARCHITECTURE.md, ROM_FORMAT.md, IR_SPEC.md and DECISIONS.md consistent.
+Keep ROADMAP_CODEX_UPDATED.md, ARCHITECTURE.md, ROM_FORMAT.md, IR_SPEC.md and DECISIONS.md consistent.
 
 Never mark a roadmap item complete without validation evidence.
 '''
@@ -613,7 +613,7 @@ Responsável pelo quality gate de cada MVP.
 ```toml
 name = "milestone_reviewer"
 description = "Read-only milestone reviewer. Use after implementation to check architecture, correctness, regressions, tests and roadmap acceptance criteria."
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 
@@ -677,7 +677,7 @@ Orquestrar o trabalho do roadmap sem permitir que um único agent implemente tud
 Comportamento esperado:
 
 ```text
-1. Ler ROADMAP_CODEX.md.
+1. Ler ROADMAP_CODEX_UPDATED.md.
 2. Localizar a primeira fase incompleta.
 3. Não avançar para fases posteriores.
 4. Avaliar se a tarefa é arquitetura, investigação, implementação, teste ou review.
@@ -694,10 +694,10 @@ Template sugerido:
 ```markdown
 ---
 name: rrpg-orchestrator
-description: Orchestrate implementation of the current RetroRPG roadmap milestone using the specialized Codex agents. Use when asked to continue, implement, execute or advance ROADMAP_CODEX.md.
+description: Orchestrate implementation of the current RetroRPG roadmap milestone using the specialized Codex agents. Use when asked to continue, implement, execute or advance ROADMAP_CODEX_UPDATED.md.
 ---
 
-Read ROADMAP_CODEX.md and applicable AGENTS.md instructions.
+Read ROADMAP_CODEX_UPDATED.md and applicable AGENTS.md instructions.
 
 Work only on the earliest incomplete milestone unless the user explicitly selects another one.
 
@@ -721,7 +721,7 @@ Before marking a milestone complete:
 2. compare results with acceptance criteria;
 3. obtain milestone_reviewer findings;
 4. fix blocking findings;
-5. update docs and ROADMAP_CODEX.md.
+5. update docs and ROADMAP_CODEX_UPDATED.md.
 
 Return a concise summary of:
 - tasks completed;
@@ -828,7 +828,7 @@ Conteúdo mínimo:
 
 ## Source of truth
 
-- ROADMAP_CODEX.md defines scope and implementation order.
+- ROADMAP_CODEX_UPDATED.md defines scope and implementation order.
 - Work on the earliest incomplete milestone unless the user explicitly selects another milestone.
 - Do not silently expand scope.
 
@@ -1031,7 +1031,7 @@ $rrpg-orchestrator
 Exemplo:
 
 ```text
-Use $rrpg-orchestrator para continuar o primeiro milestone incompleto do ROADMAP_CODEX.md.
+Use $rrpg-orchestrator para continuar o primeiro milestone incompleto do ROADMAP_CODEX_UPDATED.md.
 Planeje antes de editar, delegue para os agents especializados e só marque tarefas concluídas depois dos testes e do milestone review.
 ```
 
@@ -1238,28 +1238,28 @@ Versionar a estratégia de execução do roadmap antes de começar a implementa�
 
 ### Tarefas
 
-- [ ] Criar `AGENTS.md` na raiz.
-- [ ] Criar `.codex/config.toml`.
-- [ ] Habilitar subagents.
-- [ ] Configurar limite inicial de concorrência.
-- [ ] Criar `rrpg_architect`.
-- [ ] Criar `rom_analyst`.
-- [ ] Criar `parser_worker`.
-- [ ] Criar `unity_worker`.
-- [ ] Criar `test_worker`.
-- [ ] Criar `docs_worker`.
-- [ ] Criar `milestone_reviewer`.
-- [ ] Criar skill `rrpg-orchestrator`.
-- [ ] Criar skill `plan-current-mvp`.
-- [ ] Criar skill `analyze-rom-structure`.
-- [ ] Criar skill `implement-unity-task`.
-- [ ] Criar skill `validate-milestone`.
-- [ ] Criar `docs/AI_WORKFLOW.md`.
-- [ ] Validar que Codex detecta os custom agents.
-- [ ] Validar que Codex detecta as repo-scoped skills.
-- [ ] Executar uma tarefa read-only de teste com `rrpg_architect`.
-- [ ] Executar uma delegação simples para `test_worker` ou outro agent não destrutivo.
-- [ ] Confirmar que o main thread recebe o resumo do subagent.
+- [x] Criar `AGENTS.md` na raiz.
+- [x] Criar `.codex/config.toml`.
+- [x] Habilitar subagents.
+- [x] Configurar limite inicial de concorrência.
+- [x] Criar `rrpg_architect`.
+- [x] Criar `rom_analyst`.
+- [x] Criar `parser_worker`.
+- [x] Criar `unity_worker`.
+- [x] Criar `test_worker`.
+- [x] Criar `docs_worker`.
+- [x] Criar `milestone_reviewer`.
+- [x] Criar skill `rrpg-orchestrator`.
+- [x] Criar skill `plan-current-mvp`.
+- [x] Criar skill `analyze-rom-structure`.
+- [x] Criar skill `implement-unity-task`.
+- [x] Criar skill `validate-milestone`.
+- [x] Criar `docs/AI_WORKFLOW.md`.
+- [x] Validar que Codex detecta os custom agents.
+- [x] Validar que Codex detecta as repo-scoped skills.
+- [x] Executar uma tarefa read-only de teste com `rrpg_architect`.
+- [x] Executar uma delegação simples para `test_worker` ou outro agent não destrutivo.
+- [x] Confirmar que o main thread recebe o resumo do subagent.
 
 ### Critério de aceite
 
@@ -1293,19 +1293,19 @@ Criar a base técnica sem implementar parsing específico ainda.
 
 ### Tarefas
 
-- [ ] Criar projeto Unity 6.5 2D.
-- [ ] Configurar Git.
-- [ ] Criar `.gitignore` adequado para Unity.
-- [ ] Criar assembly definitions por camada.
-- [ ] Criar estrutura de diretórios.
-- [ ] Criar namespaces.
-- [ ] Criar `RetroRPG.Core`.
-- [ ] Criar `RetroRPG.IR`.
-- [ ] Criar `RetroRPG.Editor`.
-- [ ] Criar `RetroRPG.Runtime`.
-- [ ] Criar `RetroRPG.Importers.GBA`.
-- [ ] Criar pasta de testes.
-- [ ] Criar documentação inicial.
+- [x] Criar projeto Unity 6.5 2D.
+- [x] Configurar Git.
+- [x] Criar `.gitignore` adequado para Unity.
+- [x] Criar assembly definitions por camada.
+- [x] Criar estrutura de diretórios.
+- [x] Criar namespaces.
+- [x] Criar `RetroRPG.Core`.
+- [x] Criar `RetroRPG.IR`.
+- [x] Criar `RetroRPG.Editor`.
+- [x] Criar `RetroRPG.Runtime`.
+- [x] Criar `RetroRPG.Importers.GBA`.
+- [x] Criar pasta de testes.
+- [x] Criar documentação inicial.
 
 ### Critério de aceite
 
@@ -1335,22 +1335,22 @@ Mostrar informações
 
 ### Tarefas
 
-- [ ] Implementar `RomFile`.
-- [ ] Implementar leitura binária segura.
-- [ ] Implementar `GbaHeaderParser`.
-- [ ] Extrair título interno da ROM.
-- [ ] Extrair game code.
-- [ ] Extrair maker code.
-- [ ] Validar tamanho mínimo.
-- [ ] Criar enum/identificador de plataforma.
-- [ ] Criar `GameDetector`.
-- [ ] Criar suporte inicial a Pokémon FireRed.
-- [ ] Criar `ROM Inspector Window`.
-- [ ] Mostrar dados do header no Editor.
-- [ ] Mostrar tamanho da ROM.
-- [ ] Mostrar hash do arquivo para diagnóstico.
-- [ ] Criar logs de detecção.
-- [ ] Criar testes para ROM header parser.
+- [x] Implementar `RomFile`.
+- [x] Implementar leitura binária segura.
+- [x] Implementar `GbaHeaderParser`.
+- [x] Extrair título interno da ROM.
+- [x] Extrair game code.
+- [x] Extrair maker code.
+- [x] Validar tamanho mínimo.
+- [x] Criar enum/identificador de plataforma.
+- [x] Criar `GameDetector`.
+- [x] Criar suporte inicial a Pokémon FireRed.
+- [x] Criar `ROM Inspector Window`.
+- [x] Mostrar dados do header no Editor.
+- [x] Mostrar tamanho da ROM.
+- [x] Mostrar hash do arquivo para diagnóstico.
+- [x] Criar logs de detecção.
+- [x] Criar testes para ROM header parser.
 
 ### Critério de aceite
 
@@ -1386,41 +1386,41 @@ Abrir Scene
 
 #### Parsing
 
-- [ ] Criar abstração `RomReader`.
-- [ ] Implementar leitura little-endian.
-- [ ] Implementar leitura de ponteiros GBA quando necessária.
-- [ ] Criar `FireRedRomLayout`.
-- [ ] Centralizar offsets/endereços conhecidos.
-- [ ] Implementar parser do mapa alvo.
-- [ ] Implementar parser de tileset usado pelo mapa.
-- [ ] Implementar parser de paleta usada pelo tileset.
-- [ ] Converter tiles para representação intermediária.
+- [x] Criar abstração `RomReader`.
+- [x] Implementar leitura little-endian.
+- [x] Implementar leitura de ponteiros GBA quando necessária.
+- [x] Criar `FireRedRomLayout`.
+- [x] Centralizar offsets/endereços conhecidos.
+- [x] Implementar parser do mapa alvo.
+- [x] Implementar parser de tileset usado pelo mapa.
+- [x] Implementar parser de paleta usada pelo tileset.
+- [x] Converter tiles para representação intermediária.
 
 #### IR
 
-- [ ] Criar `MapDefinition`.
-- [ ] Criar `TilesetDefinition`.
-- [ ] Criar `PaletteDefinition`.
-- [ ] Criar identificadores estáveis.
-- [ ] Permitir serialização de debug para JSON.
+- [x] Criar `MapDefinition`.
+- [x] Criar `TilesetDefinition`.
+- [x] Criar `PaletteDefinition`.
+- [x] Criar identificadores estáveis.
+- [x] Permitir serialização de debug para JSON.
 
 #### Unity
 
-- [ ] Converter tile gráfico em `Texture2D`.
-- [ ] Gerar sprites.
-- [ ] Gerar `Tile` assets.
-- [ ] Criar `Grid`.
-- [ ] Criar `Tilemap`.
-- [ ] Popular Tilemap usando `MapDefinition`.
-- [ ] Salvar assets gerados em `Assets/Imported/FireRed`.
-- [ ] Criar Scene de preview.
+- [x] Converter tile gráfico em `Texture2D`.
+- [x] Gerar sprites.
+- [x] Gerar `Tile` assets.
+- [x] Criar `Grid`.
+- [x] Criar `Tilemap`.
+- [x] Popular Tilemap usando `MapDefinition`.
+- [x] Salvar assets gerados em `Assets/Imported/FireRed`.
+- [x] Criar Scene de preview.
 
 #### Editor
 
-- [ ] Adicionar botão `Import Pallet Town`.
-- [ ] Mostrar progresso por etapa.
-- [ ] Mostrar quantidade de tiles processados.
-- [ ] Mostrar caminho dos assets gerados.
+- [x] Adicionar botão `Import Pallet Town`.
+- [x] Mostrar progresso por etapa.
+- [x] Mostrar quantidade de tiles processados.
+- [x] Mostrar caminho dos assets gerados.
 
 ### Critério de aceite
 
@@ -1872,14 +1872,14 @@ Reason: pointer outside ROM bounds
 
 Uma tarefa é considerada concluída quando:
 
-- [ ] Código compila.
-- [ ] Não cria dependência arquitetural indevida.
-- [ ] Possui tratamento de erro adequado.
-- [ ] Possui log útil quando aplicável.
-- [ ] Possui teste quando a unidade é testável.
-- [ ] Não introduz ROM/assets proprietários no Git.
-- [ ] Não quebra importações já implementadas.
-- [ ] Documentação relevante foi atualizada.
+- [x] Código compila.
+- [x] Não cria dependência arquitetural indevida.
+- [x] Possui tratamento de erro adequado.
+- [x] Possui log útil quando aplicável.
+- [x] Possui teste quando a unidade é testável.
+- [x] Não introduz ROM/assets proprietários no Git.
+- [x] Não quebra importações já implementadas.
+- [x] Documentação relevante foi atualizada.
 
 ---
 
@@ -1920,7 +1920,7 @@ Não antecipar fases posteriores se o critério de aceite da fase atual ainda n�
 
 Primeiro prompt recomendado no Codex IDE:
 
-> Leia `ROADMAP_CODEX.md`. Execute somente a Fase -1. Crie o `AGENTS.md`, a configuração multi-agent, os custom agents e as repo-scoped skills descritas no roadmap. Não implemente ainda nenhuma funcionalidade de ROM ou Unity. Valide que agents e skills estão detectáveis no Codex e documente o workflow em `docs/AI_WORKFLOW.md`.
+> Leia `ROADMAP_CODEX_UPDATED.md`. Execute somente a Fase -1. Crie o `AGENTS.md`, a configuração multi-agent, os custom agents e as repo-scoped skills descritas no roadmap. Não implemente ainda nenhuma funcionalidade de ROM ou Unity. Valide que agents e skills estão detectáveis no Codex e documente o workflow em `docs/AI_WORKFLOW.md`.
 
 ## Passo 2 — iniciar o framework
 

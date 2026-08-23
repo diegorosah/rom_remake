@@ -19,6 +19,8 @@ namespace RetroRPG.Tests.EditMode
         [TestCase(4, 1)]
         [TestCase(3, 2)]
         [TestCase(0, -1)]
+        [TestCase(long.MaxValue, 1)]
+        [TestCase(1, long.MaxValue)]
         public void RejectsInvalidRanges(long offset, long length)
         {
             var reader = new RomReader(new byte[4]);
@@ -36,4 +38,3 @@ namespace RetroRPG.Tests.EditMode
         }
     }
 }
-

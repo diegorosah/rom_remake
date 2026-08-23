@@ -26,19 +26,19 @@ namespace RetroRPG.Importers.GBA.Common
         private RomFile(string fileName, byte[] data, RomFingerprint fingerprint)
         {
             FileName = fileName;
-            Data = data;
+            this.data = data;
             Fingerprint = fingerprint;
         }
 
-        public string FileName { get; }
+        private readonly byte[] data;
 
-        public byte[] Data { get; }
+        public string FileName { get; }
 
         public RomFingerprint Fingerprint { get; }
 
         public RomReader CreateReader()
         {
-            return new RomReader(Data);
+            return RomReader.FromOwnedBuffer(data);
         }
 
         public static RomFile Load(string path)
@@ -74,4 +74,3 @@ namespace RetroRPG.Importers.GBA.Common
         }
     }
 }
-

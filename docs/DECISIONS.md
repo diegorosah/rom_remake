@@ -13,4 +13,19 @@
 - Bottom, middle, and top Tilemaps preserve FireRed layer routing.
 - The first vertical slice includes the animations used by General and PalletTown
   tilesets but no player, NPC, collision runtime, or battle system.
+- `com.unity.2d.tilemap.extras` is not used because its 6.0.0 editor code does not
+  compile on Unity 6000.5.9f1. `RetroRPG.Unity.DeterministicAnimatedTile` implements
+  only the required `TileBase` animation contract, with fixed speed and synchronized
+  start time. Non-uniform durations are represented by repeated frames.
 
+## Verified gates
+
+- Unity compile: exit code 0.
+- Full EditMode: 37 total, 35 passed, 2 explicit skipped, 0 failed.
+- Explicit local-ROM parser integration: 1/1, including fingerprint, dimensions,
+  cells, tilesets, ranges and animations.
+- Explicit double generation/reimport: 1/1; content hashes and Unity GUIDs are stable.
+- PlayMode smoke: 1/1; three Tilemaps, valid sprites and advancing animated frames.
+
+These are implementation evidence only. The roadmap checklist remains open until the
+milestone review gate is completed.
