@@ -14,6 +14,7 @@ namespace RetroRPG.Runtime
         [SerializeField, Min(0.01f)] private float cellsPerSecond = 4f;
         [SerializeField] private bool inputEnabled = true;
         [SerializeField] private DirectionalSpriteAnimator spriteAnimator;
+        [SerializeField] private MapCellOccupancy occupancy;
         [SerializeField] private Vector2Int startingCell;
         [SerializeField] private byte startingElevation;
 
@@ -25,9 +26,14 @@ namespace RetroRPG.Runtime
         private bool isMoving;
         private bool isConfigured;
         private float moveProgress;
+        private IGridMoveInterceptor[] moveInterceptors = Array.Empty<IGridMoveInterceptor>();
+
+        /// <summary>Raised after an accepted grid step has reached its destination.</summary>
+        public event Action<PlayerController> MovementCompleted;
 
         public GridCollisionMap CollisionMap => collisionMap;
         public DirectionalSpriteAnimator SpriteAnimator => spriteAnimator;
+        public MapCellOccupancy Occupancy => occupancy;
         public float CellsPerSecond
         {
             get => cellsPerSecond;
@@ -39,6 +45,7 @@ namespace RetroRPG.Runtime
         }
 
         public Vector2Int CurrentCell => currentCell;
+        public Vector2Int ReservedCell => isMoving ? targetCell : currentCell;
         public byte Elevation => elevation;
         public GridDirection Facing => facing;
         public bool IsMoving => isMoving;
@@ -48,7 +55,59 @@ namespace RetroRPG.Runtime
             set => inputEnabled = value;
         }
 
+        /// <summary>
+        /// Replaces the deterministic movement-interception chain. Interceptors run
+        /// after facing is updated and before ordinary grid collision is evaluated.
+        /// This deliberately accepts interfaces rather than importer or map types so
+        /// runtime systems such as warps remain game-agnostic.
+        /// </summary>
+        public void SetMoveInterceptors(params IGridMoveInterceptor[] interceptors)
+        {
+            if (interceptors == null || interceptors.Length == 0)
+            {
+                moveInterceptors = Array.Empty<IGridMoveInterceptor>();
+                return;
+            }
+
+            int validCount = 0;
+            for (int index = 0; index < interceptors.Length; index++)
+            {
+                if (interceptors[index] != null)
+                {
+                    validCount++;
+                }
+            }
+
+            if (validCount == 0)
+            {
+                moveInterceptors = Array.Empty<IGridMoveInterceptor>();
+                return;
+            }
+
+            var configured = new IGridMoveInterceptor[validCount];
+            int destination = 0;
+            for (int index = 0; index < interceptors.Length; index++)
+            {
+                IGridMoveInterceptor interceptor = interceptors[index];
+                if (interceptor != null)
+                {
+                    configured[destination++] = interceptor;
+                }
+            }
+
+            moveInterceptors = configured;
+        }
+
         public void Configure(GridCollisionMap map, Vector2Int initialCell, byte initialElevation)
+        {
+            Configure(map, initialCell, initialElevation, occupancy);
+        }
+
+        public void Configure(
+            GridCollisionMap map,
+            Vector2Int initialCell,
+            byte initialElevation,
+            MapCellOccupancy configuredOccupancy)
         {
             if (map == null)
             {
@@ -75,7 +134,11 @@ namespace RetroRPG.Runtime
                     nameof(initialElevation));
             }
 
+            ValidateOccupancyMap(map, configuredOccupancy);
+            CancelPendingMove();
+            ReleaseOccupancy();
             collisionMap = map;
+            occupancy = configuredOccupancy;
             if (spriteAnimator == null)
             {
                 spriteAnimator = GetComponent<DirectionalSpriteAnimator>();
@@ -90,6 +153,7 @@ namespace RetroRPG.Runtime
             moveProgress = 0f;
             isConfigured = true;
             transform.position = collisionMap.CellCenter(currentCell);
+            RegisterOccupancyOrThrow();
             SynchronizeAnimator();
         }
 
@@ -97,6 +161,34 @@ namespace RetroRPG.Runtime
         {
             CellsPerSecond = configuredCellsPerSecond;
             Configure(map, initialCell, initialElevation);
+        }
+
+        public void Configure(
+            GridCollisionMap map,
+            Vector2Int initialCell,
+            byte initialElevation,
+            float configuredCellsPerSecond,
+            MapCellOccupancy configuredOccupancy)
+        {
+            CellsPerSecond = configuredCellsPerSecond;
+            Configure(map, initialCell, initialElevation, configuredOccupancy);
+        }
+
+        public void SetOccupancy(MapCellOccupancy configuredOccupancy)
+        {
+            ValidateOccupancyMap(collisionMap, configuredOccupancy);
+            if (occupancy == configuredOccupancy)
+            {
+                return;
+            }
+
+            CancelPendingMove();
+            ReleaseOccupancy();
+            occupancy = configuredOccupancy;
+            if (isConfigured)
+            {
+                RegisterOccupancyOrThrow();
+            }
         }
 
         public bool TryMove(GridDirection direction)
@@ -108,7 +200,19 @@ namespace RetroRPG.Runtime
 
             // A failed cardinal request still changes the facing used by the idle sprite.
             facing = direction;
+            if (TryInterceptMove(direction))
+            {
+                SynchronizeAnimator();
+                return false;
+            }
+
             if (!collisionMap.CanMove(currentCell, elevation, direction, out Vector2Int nextCell, out byte nextElevation))
+            {
+                SynchronizeAnimator();
+                return false;
+            }
+
+            if (occupancy != null && !occupancy.TryReserveMove(this, currentCell, nextCell))
             {
                 SynchronizeAnimator();
                 return false;
@@ -122,10 +226,95 @@ namespace RetroRPG.Runtime
             return true;
         }
 
+        /// <summary>
+        /// Rebinds this actor after a map transition. Unlike <see cref="Configure"/>,
+        /// the destination may intentionally be a collision-marked doorway cell.
+        /// </summary>
+        public void PlaceAfterTransition(
+            GridCollisionMap map,
+            Vector2Int destinationCell,
+            byte destinationElevation,
+            GridDirection destinationFacing)
+        {
+            PlaceAfterTransition(map, destinationCell, destinationElevation, destinationFacing, occupancy);
+        }
+
+        public void PlaceAfterTransition(
+            GridCollisionMap map,
+            Vector2Int destinationCell,
+            byte destinationElevation,
+            GridDirection destinationFacing,
+            MapCellOccupancy destinationOccupancy)
+        {
+            if (map == null)
+            {
+                throw new ArgumentNullException(nameof(map));
+            }
+
+            if (!map.IsInBounds(destinationCell))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(destinationCell), destinationCell, "Transition destination is outside the collision map.");
+            }
+
+            if (!GridDirections.IsCardinal(destinationFacing))
+            {
+                throw new ArgumentOutOfRangeException(nameof(destinationFacing), "Transition facing must be cardinal.");
+            }
+
+            ValidateOccupancyMap(map, destinationOccupancy);
+            CancelPendingMove();
+            ReleaseOccupancy();
+            collisionMap = map;
+            occupancy = destinationOccupancy;
+            if (spriteAnimator == null)
+            {
+                spriteAnimator = GetComponent<DirectionalSpriteAnimator>();
+            }
+
+            currentCell = destinationCell;
+            targetCell = destinationCell;
+            elevation = destinationElevation;
+            targetElevation = destinationElevation;
+            facing = destinationFacing;
+            isMoving = false;
+            moveProgress = 0f;
+            isConfigured = true;
+            transform.position = collisionMap.CellCenter(currentCell);
+            RegisterOccupancyOrThrow();
+            SynchronizeAnimator();
+        }
+
+        public void PlaceAfterTransition(GridCollisionMap map, Vector2Int destinationCell, byte destinationElevation)
+        {
+            PlaceAfterTransition(map, destinationCell, destinationElevation, facing);
+        }
+
         /// <summary>Advances one fixed 60 Hz movement tick.</summary>
         public void Tick()
         {
             Advance(1f / DirectionalSpriteAnimator.TickRate);
+        }
+
+        /// <summary>Abandons an in-flight step and releases its destination reservation.</summary>
+        public void CancelPendingMove()
+        {
+            if (!isMoving)
+            {
+                return;
+            }
+
+            occupancy?.CancelMove(this);
+            targetCell = currentCell;
+            targetElevation = elevation;
+            isMoving = false;
+            moveProgress = 0f;
+            if (collisionMap != null && collisionMap.IsInBounds(currentCell))
+            {
+                transform.position = collisionMap.CellCenter(currentCell);
+            }
+
+            SynchronizeAnimator();
         }
 
         /// <summary>Advances interpolation without accepting additional input.</summary>
@@ -147,10 +336,12 @@ namespace RetroRPG.Runtime
                 {
                     currentCell = targetCell;
                     elevation = targetElevation;
+                    occupancy?.CommitMove(this, currentCell);
                     isMoving = false;
                     moveProgress = 0f;
                     transform.position = collisionMap.CellCenter(currentCell);
                     SynchronizeAnimator();
+                    MovementCompleted?.Invoke(this);
                 }
             }
 
@@ -166,6 +357,11 @@ namespace RetroRPG.Runtime
             {
                 Configure(collisionMap, startingCell, startingElevation);
             }
+        }
+
+        private void OnDestroy()
+        {
+            ReleaseOccupancy();
         }
 
         private void Update()
@@ -210,6 +406,45 @@ namespace RetroRPG.Runtime
             if (spriteAnimator != null)
             {
                 spriteAnimator.SetState(facing, isMoving);
+            }
+        }
+
+        private bool TryInterceptMove(GridDirection direction)
+        {
+            for (int index = 0; index < moveInterceptors.Length; index++)
+            {
+                IGridMoveInterceptor interceptor = moveInterceptors[index];
+                if (interceptor != null && interceptor.TryInterceptMove(this, direction))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void RegisterOccupancyOrThrow()
+        {
+            if (occupancy != null && !occupancy.TryRegister(this, currentCell))
+            {
+                throw new InvalidOperationException("Player starting cell is already occupied or its map is inactive.");
+            }
+        }
+
+        private void ReleaseOccupancy()
+        {
+            if (occupancy != null)
+            {
+                occupancy.Unregister(this);
+            }
+        }
+
+        private static void ValidateOccupancyMap(GridCollisionMap map, MapCellOccupancy configuredOccupancy)
+        {
+            if (configuredOccupancy != null && map != null && configuredOccupancy.CollisionMap != null &&
+                configuredOccupancy.CollisionMap != map)
+            {
+                throw new ArgumentException("Occupancy must belong to the same collision map.", nameof(configuredOccupancy));
             }
         }
 

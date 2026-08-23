@@ -25,15 +25,20 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(romPath, Is.Not.Null.And.Not.Empty, TestRomEnvironmentVariable + " must point to a local ROM.");
 
             var firstResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(firstResult.Map, firstResult.PlayerSprite, firstResult.Report, null);
+            PalletTownAssetBuilder.Import(firstResult.Bundle, firstResult.PlayerSprite, firstResult.ObjectSprites, firstResult.Report, null);
             var first = CaptureGeneratedAssets();
             Assert.That(first.Count, Is.GreaterThan(3));
             Assert.That(ContainsPath(first, "/Player/"), Is.True);
+            Assert.That(ContainsPath(first, "/Objects/"), Is.True);
             Assert.That(ContainsPath(first, ".unity"), Is.True);
+            Assert.That(File.ReadAllText(Path.Combine(PalletTownAssetBuilder.GetOutputFolderAbsolutePath(), "PalletTown.ir.json")), Does.Contain("\"schemaVersion\": 3"));
+            Assert.That(ContainsPath(first, "/MAP_PALLET_TOWN_PLAYERS_HOUSE_1F/"), Is.True);
+            Assert.That(ContainsPath(first, "/MAP_PALLET_TOWN_PLAYERS_HOUSE_2F/"), Is.True);
+            Assert.That(ContainsPath(first, "/MAP_PALLET_TOWN_RIVALS_HOUSE/"), Is.True);
             AssertGeneratedSceneComponents();
 
             var secondResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(secondResult.Map, secondResult.PlayerSprite, secondResult.Report, null);
+            PalletTownAssetBuilder.Import(secondResult.Bundle, secondResult.PlayerSprite, secondResult.ObjectSprites, secondResult.Report, null);
             var second = CaptureGeneratedAssets();
 
             CollectionAssert.AreEquivalent(first.Keys, second.Keys);
@@ -63,6 +68,10 @@ namespace RetroRPG.Tests.EditMode
             for (var i = 0; i < root.Length; i++)
             {
                 if (root[i].name == "Pallet Town") palletTown = root[i];
+                if (root[i].name == "Maps" && root[i].transform.Find("MAP_PALLET_TOWN") != null)
+                {
+                    palletTown = root[i].transform.Find("MAP_PALLET_TOWN").gameObject;
+                }
                 if (root[i].name == "Main Camera") camera = root[i];
             }
 
@@ -70,30 +79,49 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(palletTown.transform.Find("Bottom").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
             Assert.That(palletTown.transform.Find("Middle").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
             Assert.That(palletTown.transform.Find("Top").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
-            var collision = palletTown.transform.Find("Collision");
-            var player = palletTown.transform.Find("Player");
-            Assert.That(collision, Is.Not.Null);
-            Assert.That(collision.GetComponent<GridCollisionMap>(), Is.Not.Null);
+            Assert.That(palletTown.transform.Find("Collision").GetComponent<GridCollisionMap>(), Is.Not.Null);
+            var mapRoots = palletTown.transform.parent.GetComponentsInChildren<MapRuntimeRoot>(true);
+            Assert.That(mapRoots, Has.Length.EqualTo(4));
+            var npcCount = 0;
+            for (var index = 0; index < mapRoots.Length; index++)
+            {
+                Assert.That(mapRoots[index].CollisionMap, Is.Not.Null);
+                Assert.That(mapRoots[index].Occupancy, Is.Not.Null);
+                Assert.That(mapRoots[index].Warps, Is.Not.Null);
+                Assert.That(mapRoots[index].GetComponent<NpcSimulationDriver>(), Is.Not.Null);
+                npcCount += mapRoots[index].Npcs.Count;
+            }
+            Assert.That(npcCount, Is.EqualTo(5));
+            Transform player = null;
+            {
+                var roots = scene.GetRootGameObjects();
+                for (var index = 0; index < roots.Length; index++)
+                {
+                    if (roots[index].name == "Player") { player = roots[index].transform; break; }
+                }
+            }
             Assert.That(player, Is.Not.Null);
-            Assert.That(player.GetComponent<PlayerController>(), Is.Not.Null);
+            var playerController = player.GetComponent<PlayerController>();
+            Assert.That(playerController, Is.Not.Null);
+            Assert.That(playerController.Occupancy, Is.SameAs(palletTown.GetComponent<MapRuntimeRoot>().Occupancy));
             Assert.That(player.GetComponent<DirectionalSpriteAnimator>(), Is.Not.Null);
             Assert.That(camera, Is.Not.Null);
             Assert.That(camera.GetComponent<PixelPerfectCameraFollow>(), Is.Not.Null);
+            var catalog = UnityEngine.Object.FindAnyObjectByType<RuntimeMapCatalog>();
+            Assert.That(catalog, Is.Not.Null);
+            Assert.That(catalog.Maps, Has.Count.EqualTo(4));
+            Assert.That(catalog.GetComponent<MapTransitionSystem>(), Is.Not.Null);
             Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(scenePath));
         }
 
-        private static PalletTownParseResult ParseSupportedRom(string romPath)
+        private static FireRedMapBundleParseResult ParseSupportedRom(string romPath)
         {
             var rom = RomFile.Load(romPath);
             Assert.That(rom.Fingerprint.Sha1, Is.EqualTo(PokemonFireRedAdapter.SupportedSha1));
-            var result = new PalletTownParser().Parse(rom);
-            Assert.That(result.Succeeded, Is.True, string.Join("\n", result.Report.Diagnostics));
-            Assert.That(result.Map.Width, Is.EqualTo(24));
-            Assert.That(result.Map.Height, Is.EqualTo(20));
-            Assert.That(result.Map.Cells.Count, Is.EqualTo(480));
-            Assert.That(result.Map.PrimaryTileset.Id, Is.EqualTo("General"));
-            Assert.That(result.Map.SecondaryTileset.Id, Is.EqualTo("PalletTown"));
-            Assert.That(result.Map.PrimaryTileset.Animations.Count, Is.GreaterThan(0));
+            var result = new FireRedMapBundleParser().Parse(rom);
+            Assert.That(result.Succeeded, Is.True, "Bundle parser failed with " + result.Report.Diagnostics.Count + " diagnostics.");
+            Assert.That(result.Bundle.Maps, Has.Count.EqualTo(4));
+            Assert.That(result.Bundle.GetMap(FireRedRomLayoutRev1.PalletTownMapId).Cells, Has.Count.EqualTo(480));
             return result;
         }
 

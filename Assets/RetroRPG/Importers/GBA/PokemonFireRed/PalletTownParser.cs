@@ -28,34 +28,13 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public PalletTownParseResult Parse(RomFile rom)
         {
             if (rom == null) throw new ArgumentNullException(nameof(rom));
-
-            var report = new ImportReport(Stage);
-            try
+            var bundleResult = new FireRedMapBundleParser().Parse(rom);
+            if (!bundleResult.Succeeded)
             {
-                var header = GbaHeaderParser.Parse(rom.CreateReader());
-                var detection = new PokemonFireRedAdapter().Detect(header, rom.Fingerprint);
-                if (!detection.CanImport)
-                {
-                    report.Add(new ParseDiagnostic("Game", DiagnosticSeverity.Error, detection.Message));
-                    return new PalletTownParseResult(null, null, report);
-                }
-
-                return ParseSupportedReader(rom.CreateReader(), report);
-            }
-            catch (RomReadException exception)
-            {
-                report.Add(new ParseDiagnostic("ROM", DiagnosticSeverity.Error, exception.Message, exception.Offset, ToDiagnosticLength(exception.RequestedLength)));
-            }
-            catch (InvalidOperationException exception)
-            {
-                report.Add(new ParseDiagnostic("Format", DiagnosticSeverity.Error, exception.Message));
-            }
-            catch (OverflowException exception)
-            {
-                report.Add(new ParseDiagnostic("Safety", DiagnosticSeverity.Error, exception.Message));
+                return new PalletTownParseResult(null, null, bundleResult.Report);
             }
 
-            return new PalletTownParseResult(null, null, report);
+            return new PalletTownParseResult(bundleResult.Bundle.GetMap(FireRedRomLayoutRev1.PalletTownMapId), bundleResult.PlayerSprite, bundleResult.Report);
         }
 
         private static PalletTownParseResult ParseSupportedReader(RomReader reader, ImportReport report)

@@ -142,7 +142,7 @@ namespace RetroRPG.Editor
 
             using (new EditorGUI.DisabledScope(!detection.CanImport))
             {
-                if (GUILayout.Button("Import Pallet Town"))
+                if (GUILayout.Button("Import Pallet Area"))
                 {
                     ImportPalletTown(selectedPath);
                 }
@@ -211,15 +211,17 @@ namespace RetroRPG.Editor
                     return;
                 }
 
-                var parsed = new PalletTownParser().Parse(snapshot);
+                // MVP3 deliberately parses the complete bounded transition catalog
+                // before the asset builder is allowed to touch its output folder.
+                var parsed = new FireRedMapBundleParser().Parse(snapshot);
                 inspectionReport = parsed.Report;
                 if (!parsed.Succeeded)
                 {
                     return;
                 }
 
-                PalletTownAssetBuilder.Import(parsed.Map, parsed.PlayerSprite, parsed.Report, ShowImportProgress);
-                EditorUtility.DisplayDialog("Pallet Town importer", "Pallet Town assets and scene were generated successfully.", "OK");
+                PalletTownAssetBuilder.Import(parsed.Bundle, parsed.PlayerSprite, parsed.ObjectSprites, parsed.Report, ShowImportProgress);
+                EditorUtility.DisplayDialog("Pallet Area importer", "Pallet Town and its MVP3 map catalog were generated successfully.", "OK");
             }
             catch (OperationCanceledException exception)
             {
@@ -234,7 +236,7 @@ namespace RetroRPG.Editor
             catch (Exception)
             {
                 inspectionReport = new ImportReport("UNITY_IMPORT");
-                inspectionReport.Add(new ParseDiagnostic("Import", DiagnosticSeverity.Error, "Pallet Town generation failed before completion. See the Inspector diagnostics after correcting the reported input."));
+                inspectionReport.Add(new ParseDiagnostic("Import", DiagnosticSeverity.Error, "Pallet Area generation failed before completion. See the Inspector diagnostics after correcting the reported input."));
             }
             finally
             {
@@ -249,7 +251,7 @@ namespace RetroRPG.Editor
 
         private static bool ShowImportProgress(string stage, float progress)
         {
-            return EditorUtility.DisplayCancelableProgressBar("Import Pallet Town", stage, progress);
+            return EditorUtility.DisplayCancelableProgressBar("Import Pallet Area", stage, progress);
         }
 
         private static void OpenImportedScene()

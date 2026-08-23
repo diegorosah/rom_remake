@@ -78,11 +78,46 @@ namespace RetroRPG.Tests.PlayMode
             var player = Object.FindAnyObjectByType<PlayerController>();
             var animator = Object.FindAnyObjectByType<DirectionalSpriteAnimator>();
             var follow = Object.FindAnyObjectByType<PixelPerfectCameraFollow>();
+            var catalog = Object.FindAnyObjectByType<RuntimeMapCatalog>();
+            var transitions = Object.FindAnyObjectByType<MapTransitionSystem>();
             Assert.That(collision, Is.Not.Null);
             Assert.That(player, Is.Not.Null);
             Assert.That(animator, Is.Not.Null);
             Assert.That(player.SpriteAnimator, Is.SameAs(animator));
             Assert.That(follow, Is.Not.Null);
+            Assert.That(catalog, Is.Not.Null);
+            Assert.That(catalog.Maps, Has.Count.EqualTo(4));
+            Assert.That(transitions, Is.Not.Null);
+            Assert.That(transitions.ActiveMap, Is.Not.Null);
+            Assert.That(transitions.ActiveMap.MapId, Is.EqualTo("MAP_PALLET_TOWN"));
+            Assert.That(transitions.ActiveMap.Npcs, Has.Count.EqualTo(3));
+            Assert.That(transitions.ActiveMap.Occupancy, Is.Not.Null);
+            Assert.That(transitions.ActiveMap.GetComponent<NpcSimulationDriver>(), Is.Not.Null);
+            var visiblePalletNpcs = 0;
+            for (var npcIndex = 0; npcIndex < transitions.ActiveMap.Npcs.Count; npcIndex++)
+            {
+                var npc = transitions.ActiveMap.Npcs[npcIndex];
+                Assert.That(npc.SpriteAnimator, Is.Not.Null);
+                Assert.That(npc.SpriteAnimator.CurrentSprite, Is.Not.Null);
+                if (npc.IsVisible) visiblePalletNpcs++;
+            }
+            Assert.That(visiblePalletNpcs, Is.EqualTo(2));
+            for (var mapIndex = 0; mapIndex < catalog.Maps.Count; mapIndex++)
+            {
+                var runtimeMap = catalog.Maps[mapIndex];
+                Assert.That(runtimeMap, Is.Not.Null);
+                Assert.That(runtimeMap.CollisionMap, Is.Not.Null);
+                for (var warpIndex = 0; warpIndex < runtimeMap.Warps.Count; warpIndex++)
+                {
+                    var warp = runtimeMap.Warps[warpIndex];
+                    Assert.That(warp, Is.Not.Null);
+                    Assert.That(warp.HasValidIdentity(), Is.True);
+                    if (catalog.TryResolve(warp.DestinationMapId, out var destinationMap))
+                    {
+                        Assert.That(destinationMap.TryGetWarp(warp.DestinationWarpId, out _), Is.True);
+                    }
+                }
+            }
             player.InputEnabled = false;
             Assert.That(player.CurrentCell, Is.EqualTo(new Vector2Int(6, 6)));
             Assert.That(player.Elevation, Is.EqualTo(3));

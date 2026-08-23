@@ -5,7 +5,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
 {
     // Verified file offsets for the supported Pokemon FireRed USA revision 1 fingerprint.
     // GBA pointers are file offsets plus 0x08000000.
-    public static class FireRedRomLayoutRev1
+    public static partial class FireRedRomLayoutRev1
     {
         public const int MapLayoutsTable = 0x34EBFC;
         public const int MapGroupsTable = 0x352718;
@@ -23,13 +23,85 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public const int PalletTownPrimaryTileset = 0x2D4B04;
         public const int PalletTownSecondaryTileset = 0x2D4B1C;
 
+        // MVP 3 selected Pallet Town interior bundle. All values are file offsets
+        // verified only for the supported USA revision 1 fingerprint.
+        public const int IndoorPalletMapGroup = 0x35246C;
+        public const int PlayersHouse1FMapGroup = 4;
+        public const int PlayersHouse1FMapNumber = 0;
+        public const int PlayersHouse1FMapHeader = 0x350DC0;
+        public const int PlayersHouse1FMapLayout = 0x2D5270;
+        public const int PlayersHouse1FEvents = 0x3B97BC;
+        public const int PlayersHouse1FMapCells = 0x2D516C;
+        public const int PlayersHouse1FBorderCells = 0x2D5164;
+        public const int PlayersHouse2FMapNumber = 1;
+        public const int PlayersHouse2FMapHeader = 0x350DDC;
+        public const int PlayersHouse2FMapLayout = 0x2D536C;
+        public const int PlayersHouse2FEvents = 0x3B97FC;
+        public const int PlayersHouse2FMapCells = 0x2D5294;
+        public const int PlayersHouse2FBorderCells = 0x2D528C;
+        public const int RivalsHouseMapNumber = 2;
+        public const int RivalsHouseMapHeader = 0x350DF8;
+        public const int RivalsHouseMapLayout = 0x2D5494;
+        public const int RivalsHouseEvents = 0x3B987C;
+        public const int RivalsHouseMapCells = 0x2D5390;
+        public const int RivalsHouseBorderCells = 0x2D5388;
+        public const int OakLabMapNumber = 3;
+        public const int OakLabMapHeader = 0x350E14;
+        public const int OakLabMapLayout = 0x2D56D8;
+
+        public const string PalletTownMapId = "MAP_PALLET_TOWN";
+        public const string PlayersHouse1FMapId = "MAP_PALLET_TOWN_PLAYERS_HOUSE_1F";
+        public const string PlayersHouse2FMapId = "MAP_PALLET_TOWN_PLAYERS_HOUSE_2F";
+        public const string RivalsHouseMapId = "MAP_PALLET_TOWN_RIVALS_HOUSE";
+        public const string OakLabMapId = "MAP_PALLET_TOWN_OAKS_LAB";
+
         public const int GbaPointerBase = 0x08000000;
         public const uint ThumbPointerAddressMask = 0xFFFFFFFEu;
         public const int MapHeaderSize = 0x1C;
         public const int MapLayoutSize = 0x1C;
         public const int TilesetSize = 0x18;
+        public const int MapEventsSize = 0x14;
+        public const int WarpEventSize = 8;
+        public const int ObjectEventSize = 0x18;
+        public const int ObjectEventTemplateSize = 0x18;
+        public const int ObjectEventGraphicsInfoCount = 152;
+        public const int ObjectEventTemplateLocalIdOffset = 0;
+        public const int ObjectEventTemplateGraphicsIdOffset = 1;
+        public const int ObjectEventTemplateKindOffset = 2;
+        public const int ObjectEventTemplateReservedOffset = 3;
+        public const int ObjectEventTemplateXOffset = 4;
+        public const int ObjectEventTemplateYOffset = 6;
+        public const int ObjectEventTemplateElevationOffset = 8;
+        public const int ObjectEventTemplateMovementOffset = 9;
+        public const int ObjectEventTemplateRangesOffset = 0x0A;
+        public const int ObjectEventTemplateTrainerTypeOffset = 0x0B;
+        public const int ObjectEventTemplateTrainerRangeOffset = 0x0C;
+        public const int ObjectEventTemplateScriptOffset = 0x10;
+        public const int ObjectEventTemplateVisibilityFlagOffset = 0x14;
+        public const int CoordEventSize = 0x10;
+        public const int BackgroundEventSize = 0x0C;
+        public const int MapEventsObjectCountOffset = 0;
+        public const int MapEventsWarpCountOffset = 1;
+        public const int MapEventsCoordCountOffset = 2;
+        public const int MapEventsBackgroundCountOffset = 3;
+        public const int MapEventsObjectPointerOffset = 4;
+        public const int MapEventsWarpPointerOffset = 8;
+        public const int MapEventsCoordPointerOffset = 0x0C;
+        public const int MapEventsBackgroundPointerOffset = 0x10;
+        public const int WarpEventXOffset = 0;
+        public const int WarpEventYOffset = 2;
+        public const int WarpEventElevationOffset = 4;
+        public const int WarpEventDestinationWarpIndexOffset = 5;
+        public const int WarpEventDestinationMapNumberOffset = 6;
+        public const int WarpEventDestinationMapGroupOffset = 7;
         public const int PalletTownWidth = 24;
         public const int PalletTownHeight = 20;
+        public const int PlayersHouse1FWidth = 13;
+        public const int PlayersHouse1FHeight = 10;
+        public const int PlayersHouse2FWidth = 12;
+        public const int PlayersHouse2FHeight = 9;
+        public const int RivalsHouseWidth = 13;
+        public const int RivalsHouseHeight = 10;
         public const int PrimaryTileCount = 640;
         public const int SecondaryTileCount = 76;
         public const int PrimaryMetatileCount = 640;
@@ -51,6 +123,35 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public const int PalletTownMetatiles = 0x2A2938;
         public const int PalletTownMetatileAttributes = 0x2A2EC8;
 
+        public const int BuildingTileset = 0x2D4C24;
+        public const int BuildingTiles = 0x275304;
+        public const int BuildingPalettes = 0x277704;
+        public const int BuildingMetatiles = 0x2AD824;
+        public const int BuildingMetatileAttributes = 0x2B0024;
+        public const int GenericBuilding1Tileset = 0x2D4CE4;
+        public const int GenericBuilding1Tiles = 0xEA99F4;
+        public const int GenericBuilding1Palettes = 0xEA97F4;
+        public const int GenericBuilding1Metatiles = 0x2B4EBC;
+        public const int GenericBuilding1MetatileAttributes = 0x2B503C;
+        public const int GenericBuilding2Tileset = 0x2D4EF4;
+        public const int GenericBuilding2Tiles = 0x28E614;
+        public const int GenericBuilding2Palettes = 0x28ECE0;
+        public const int GenericBuilding2Metatiles = 0x2BEF84;
+        public const int GenericBuilding2MetatileAttributes = 0x2BFB04;
+        public const int BuildingTileCount = 640;
+        public const int BuildingPaletteCount = 7;
+        public const int BuildingMetatileCount = 640;
+        public const int GenericBuilding1TileCount = 63;
+        public const int GenericBuilding1PaletteCount = 6;
+        public const int GenericBuilding1MetatileCount = 24;
+        public const int GenericBuilding2TileCount = 152;
+        public const int GenericBuilding2PaletteCount = 6;
+        public const int GenericBuilding2MetatileCount = 184;
+        public const int WarpDoorBehavior = 0x69;
+        public const int SouthArrowBehavior = 0x65;
+        public const int UpRightStairBehavior = 0x6C;
+        public const int DownLeftStairBehavior = 0x6F;
+
         public static readonly int[] GeneralFlowerAnimationFrames = { 0x3A7450, 0x3A74D0, 0x3A7550, 0x3A75D0, 0x3A7650 };
         public static readonly int[] GeneralWaterAnimationFrames = { 0x3A76E4, 0x3A7CE4, 0x3A82E4, 0x3A88E4, 0x3A8EE4, 0x3A94E4, 0x3A9AE4, 0x3AA0E4 };
         public static readonly int[] GeneralSandAnimationFrames = { 0x3AA6E4, 0x3AA924, 0x3AAB64, 0x3AADA4, 0x3AAFE4, 0x3AB224, 0x3AB464, 0x3AB6A4 };
@@ -58,6 +159,15 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         // Player Red, normal on-foot object-event graphics. All values are verified for
         // the supported FireRed USA revision 1 fingerprint only.
         public const int ObjectEventGraphicsInfoPointerTable = 0x39FE20;
+        public const int StandardObjectAnimationTable = 0x3A33D8;
+        public const int InanimateObjectAnimationTable = 0x3A3384;
+        public const int InanimateObjectAnimationScript = 0x3A29C0;
+        public const int ObjectPalette1103Entry = 0x3A51C8;
+        public const int ObjectPalette1103Data = 0x36D898;
+        public const int ObjectPalette1105Entry = 0x3A51D8;
+        public const int ObjectPalette1105Data = 0x36D8D8;
+        public const int ObjectPalette1106Entry = 0x3A51E0;
+        public const int ObjectPalette1106Data = 0x36D8F8;
         public const int PlayerRedNormalGraphicsInfoPointerIndex = 0;
         public const int PlayerRedNormalGraphicsInfo = 0x3A3C20;
         public const int ObjectEventGraphicsInfoSize = 0x24;

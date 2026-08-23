@@ -299,3 +299,240 @@ passable elevation-3 cell; canonical warp-based placement belongs to MVP 3.
   LZ77 and tile data contracts.
 
 No source code or proprietary asset from the decompilation is copied into this project.
+
+## MVP 3 — Pallet Town warp bundle (audited rev1)
+
+This section records the exact data needed for the first interior transition bundle.
+All offsets below are file offsets in the validated FireRed USA v1.1/BPRE snapshot;
+each pointer is accepted only when it is a canonical GBA pointer (`0x08000000`-
+`0x08FFFFFF`) whose converted range is inside the 16 MiB ROM. The map-group table
+is at `0x352718`; group 3 points to `TownsAndRoutes` at `0x352364` and group 4
+points to `IndoorPallet` at `0x35246C`.
+
+### Selected maps and pointer chain
+
+`MapHeader` is `0x1C` bytes. Its first four fields are pointers to `MapLayout`,
+`MapEvents`, scripts and connections. `MapLayout` is `0x1C` bytes with signed
+32-bit width/height, border/map pointers, primary/secondary tileset pointers and
+border dimensions. The following values are verified in the ROM and cross-checked
+against the named map/layout records in `pret/pokefirered`:
+
+| Map (group:number) | Header | Layout | Dimensions | Events | Layout ID | Primary / secondary |
+|---|---:|---:|---:|---:|---:|---|
+| Pallet Town (3:0) | `0x350688` | `0x2DD530` | 24×20 | `0x3B4EC0` | 78 | General / PalletTown |
+| PlayersHouse1F (4:0) | `0x350DC0` | `0x2D5270` | 13×10 | `0x3B97BC` | 1 | Building / GenericBuilding1 |
+| PlayersHouse2F (4:1) | `0x350DDC` | `0x2D536C` | 12×9 | `0x3B97FC` | 2 | Building / GenericBuilding1 |
+| RivalsHouse (4:2) | `0x350DF8` | `0x2D5494` | 13×10 | `0x3B987C` | 3 | Building / GenericBuilding2 |
+
+The corresponding map-cell pointers are `0x2DD170`, `0x2D516C`, `0x2D5294`
+and `0x2D5390`; border pointers are `0x2DD168`, `0x2D5164`, `0x2D528C`
+and `0x2D5388`. Cell count is width×height, so the selected bundle contains
+848 map cells. Oak's Lab (group 4, map 3; header `0x350E14`, layout `0x2D56D8`)
+is intentionally outside this bundle even though Pallet's third door references it.
+
+### MapEvents and WarpEvent
+
+`MapEvents` is 20 bytes: counts at offsets `0..3`, followed by pointers at
+`+4/+8/+C/+10` for object, warp, coordinate and background event arrays. A
+`WarpEvent` is 8 bytes: signed `s16 x,y`, `u8 elevation`, `u8 warpId`,
+`u8 mapNum`, `u8 mapGroup`. The exact event counts are:
+
+| Map | Objects | Warps | Coordinates | Background | Warp array |
+|---|---:|---:|---:|---:|---:|
+| Pallet Town | 3 | 3 | 3 | 5 | `0x3B4E3C` |
+| PlayersHouse1F | 1 | 4 | 0 | 1 | `0x3B9790` |
+| PlayersHouse2F | 0 | 1 | 0 | 3 | `0x3B97D0` |
+| RivalsHouse | 2 | 3 | 0 | 3 | `0x3B9840` |
+| **Total** | **6** | **11** | **3** | **12** | |
+
+The eleven records resolve as follows (destination is `mapNum:mapGroup`):
+
+| Source | `(x,y,elevation,warpId)` | Destination |
+|---|---|---|
+| Pallet Town #0 (`0x3B4E3C`) | `(6,7,0,1)` | PlayersHouse1F (`0:4`) |
+| Pallet Town #1 (`0x3B4E44`) | `(15,7,0,0)` | RivalsHouse (`2:4`) |
+| Pallet Town #2 (`0x3B4E4C`) | `(16,13,0,0)` | Oak Lab (`3:4`, excluded) |
+| PlayersHouse1F #0 (`0x3B9790`) | `(5,8,3,0)` | Pallet Town (`0:3`) |
+| PlayersHouse1F #1 (`0x3B9798`) | `(4,8,3,0)` | Pallet Town (`0:3`) |
+| PlayersHouse1F #2 (`0x3B97A0`) | `(10,2,3,0)` | PlayersHouse2F (`1:4`) |
+| PlayersHouse1F #3 (`0x3B97A8`) | `(3,9,0,0)` | Pallet Town (`0:3`) |
+| PlayersHouse2F #0 (`0x3B97D0`) | `(10,2,3,2)` | PlayersHouse1F (`0:4`) |
+| RivalsHouse #0 (`0x3B9840`) | `(4,8,3,1)` | Pallet Town (`0:3`) |
+| RivalsHouse #1 (`0x3B9848`) | `(5,8,3,1)` | Pallet Town (`0:3`) |
+| RivalsHouse #2 (`0x3B9850`) | `(3,8,3,1)` | Pallet Town (`0:3`) |
+
+The records have no activation field; activation is derived declaratively from the
+verified metatile behavior and direction. Pallet warps 0/1 are collision-1
+`WARP_DOOR` (`0x69`) targets activated by a north attempt from the cell below.
+House1F warp 1 and Rival warp 0 use `SOUTH_ARROW` (`0x65`) and activate south;
+House1F warp 2 uses `UP_RIGHT_STAIR` (`0x6C`) and activates east; House2F warp 0
+uses `DOWN_LEFT_STAIR` (`0x6F`) and activates west. House1F warps 0/3 and Rival
+warps 1/2 lie on behavior `0x00` and remain inactive records. Arrival facing is
+south for a door, north for `SOUTH_ARROW`, west for `UP_RIGHT_STAIR` and east for
+`DOWN_LEFT_STAIR`. The engine places the player on the destination record but does
+not evaluate a warp merely because a scene loaded; the normalized runtime also
+suppresses that arrival record until the first completed move away.
+
+### Interior tilesets
+
+The tileset structures are verified at the following offsets. `tiles`, `palettes`,
+`metatiles` and `metatileAttributes` are the pointer fields at structure offsets
+`+4`, `+8`, `+C` and `+14`. Graphics use LZ77 type `0x10`; decoded sizes and counts
+are checked before allocation. Metatiles are eight `u16` entries (16 bytes each)
+and attributes are one `u32` per metatile.
+
+| Tileset | Struct | Graphics | Decoded tiles | Palettes | Metatiles | Attributes | Metatile count |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Building | `0x2D4C24` | `0x275304` | 20,480 B / 640 | `0x277704` | `0x2AD824` | `0x2B0024` | 640 |
+| GenericBuilding1 | `0x2D4CE4` | `0xEA99F4` | 2,016 B / 63 | `0xEA97F4` | `0x2B4EBC` | `0x2B503C` | 24 |
+| GenericBuilding2 | `0x2D4EF4` | `0x28E614` | 4,864 B / 152 | `0x28ECE0` | `0x2BEF84` | `0x2BFB04` | 184 |
+
+The aggregate acceptance gate is four exact map header/layout chains; dimensions
+13×10, 12×9 and 13×10 for the interiors; 848 cells; 11 warp records with the
+flow above; 6 object events, 12 background events, 3 coordinate events; and a
+bounds-safe decode of the three tilesets (855 graphics tiles and 848 metatiles).
+No script or callback is executed. Oak Lab's layout, events and tileset are not
+parsed by this selected-bundle gate and remain explicit follow-up scope.
+
+Verified cell aggregates provide a structural integration check: House1F has 130
+cells with collision 0/1 counts 76/54 and elevation 0/3 counts 54/76; House2F has
+108 cells with collision 0/1 counts 70/38 and elevation 0/3/4 counts 43/63/2;
+Rival House has 130 cells with collision 0/1 counts 85/45 and elevation 0/3 counts
+35/95.
+
+The parser validates the exact header and SHA-1 before using any named offset. It
+checks both `gMapGroups` and `gMapLayouts` pointer routes, positive dimensions,
+`width * height * 2`, every `count * stride`, and all base/index additions with
+checked arithmetic. `MapEvents` must be in range; a positive count requires a
+canonical pointer and complete array range, while only count zero permits null.
+Warp source coordinates must be inside the source map. All selected maps are parsed
+before destinations are resolved; an internal destination must name a selected map
+and a valid zero-based warp index. Oak's Lab is retained as an explicit unresolved
+destination that produces a warning and remains blocked at runtime.
+
+### Evidence and implementation boundary
+
+Primary evidence is commit `c75f352304d529f6ba92d4f74b9cf8b5c3810788` of
+`pret/pokefirered`, especially `include/global.fieldmap.h` (structure sizes,
+pointer fields and `WarpEvent`), `data/maps/map_groups.json` (group ordering and
+names), `data/layouts/layouts.json` (dimensions and tileset names), and the named
+map/event and tileset data generated by that revision. This project copies neither
+decompilation code nor proprietary assets. The parser emits neutral map/warp IR;
+Unity transitions, fades, facing, suppression and gameplay ownership remain
+runtime decisions.
+
+## MVP 4 — selected object events and NPC graphics (audited rev1)
+
+The selected four-map bundle contains six `ObjectEventTemplate` records: five
+humanoid NPCs and one inanimate Town Map prop. `ObjectEventTemplate` is `0x18`
+bytes: local/graphics/kind bytes at `+0x00..+0x02`, signed coordinates at
+`+0x04/+0x06`, elevation/movement at `+0x08/+0x09`, packed movement ranges at
+`+0x0A`, trainer fields at `+0x0C/+0x0E`, script pointer at `+0x10` and visibility
+flag at `+0x14`. All selected records are normal kind 0 with zero reserved and
+trainer fields. Script pointers are retained only as identities and never executed.
+
+| Map | Object array | Count | Selected records |
+|---|---:|---:|---|
+| Pallet Town | `0x3B4DF4` | 3 | Woman1 `(3,10)`, FatMan `(13,17)`, ProfOak `(10,8)` |
+| PlayersHouse1F | `0x3B9778` | 1 | Mom `(8,4)` |
+| PlayersHouse2F | null | 0 | none |
+| RivalsHouse | `0x3B9810` | 2 | Daisy `(10,6)`, TownMap prop `(6,4)` |
+
+Local IDs are one-based and unique per map. Woman, Fat Man and Daisy use movement
+type `0x02` (`WANDER_AROUND`) and begin facing south. Oak uses `0x07` (north),
+TownMap uses `0x08` (south) and Mom uses `0x09` (west). Wander ranges are Woman
+X 2..4/Y 6..14, Fat Man X 7..19/Y 15..19, and Daisy X 9..11/Y 3..9. The five
+humanoid start cells are collision 0/elevation 3. TownMap is intentionally a
+collision-1 wall prop and must not receive a mobile NPC controller.
+
+The graphics-info pointer table is `0x39FE20`, stride 4, 152 static entries:
+
+| Graphics ID | Info | Image table / logical frames | Raw graphics | Palette tag |
+|---:|---:|---:|---:|---:|
+| 23 Woman1 | `0x3A3DD0` | `0x3A06F8` / 10 | `0x370418` (`0xA00`) | `0x1105` |
+| 27 FatMan | `0x3A3E84` | `0x3A0830` / 9 | `0x373418` (`0x900`) | `0x1106` |
+| 71 ProfOak | `0x3A43DC` | `0x3A1408` / 9 | `0x389B98` (`0x900`) | `0x1106` |
+| 76 Daisy | `0x3A4838` | `0x3A1A90` / 9 | `0x36B198` (`0x900`) | `0x1105` |
+| 88 Mom | `0x3A515C` | `0x3A2978` / 9 logical | `0x391B98` (`0x300` unique) | `0x1103` |
+| 93 TownMap | `0x3A49A0` | `0x3A1C70` / 1 | `0x369E98` (`0x100`) | `0x1103` |
+
+Humanoids are 16×32, raw 4bpp, `0x100` bytes per logical frame and use the
+already-audited standard eight cardinal idle/walk scripts at `0x3A33D8`. Woman's
+tenth raise-hand frame is retained but unused by basic movement. Mom's logical
+pointers repeat three physical frames and must preserve logical indices. TownMap is
+32×16, inanimate, uses the inanimate table at `0x3A3384`, and emits a static state.
+
+The selected raw BGR555 palettes are tag `0x1103` at entry `0x3A51C8` →
+`0x36D898`, tag `0x1105` at `0x3A51D8` → `0x36D8D8`, and tag `0x1106` at
+`0x3A51E0` → `0x36D8F8`; each contains exactly 16 colors (`0x20` bytes), with
+index zero transparent.
+
+Bounds rules: exact fingerprint first; validate full `MapEvents` and checked
+`count * 0x18`; pointer null only for zero count; validate each complete template,
+signed coordinates, elevation, local-ID uniqueness, supported movement type and
+reserved fields. Graphics IDs must be below 152; every graphics-info record, frame
+table entry, raw frame and palette range is checked before decoding. Only the
+verified standard/inanimate animation tables and frame counts are accepted; commands
+are decoded declaratively with bounded counts and a final jump-to-zero. No arbitrary
+script, callback or ROM control flow is followed.
+
+Flag 0 objects are visible. The explicit new-game preview profile hides Oak through
+flag `0x002C`, shows TownMap until flag `0x0039` is set, and shows all other selected
+objects. The parser preserves flag identity; this initial visibility profile is an
+adapter/runtime policy, not an inference made by generic IR.
+
+Primary references are `include/global.fieldmap.h`, `include/sprite.h`, constants
+for event objects/movement/flags, the four selected `data/maps/*` records,
+`src/event_object_movement.c`, `src/event_object_lock.c` and
+`src/data/object_events/object_event_{graphics_info,graphics,pic_tables,anims}.h`
+at `pret/pokefirered` commit `c75f352304d529f6ba92d4f74b9cf8b5c3810788`.
+
+## MVP 5 — bounded dialogue circuits (audited rev1)
+
+Dialogue import remains declarative: the adapter recognizes a small whitelist of
+verified script shapes, resolves their text pointers, and emits neutral dialogue
+IR. It never executes ROM scripts, calls specials, mutates flags/variables, or
+interprets an arbitrary opcode stream.
+
+The six selected object events carry these script identities (file offsets):
+
+| Target | Script | MVP 5 policy |
+|---|---:|---|
+| Pallet Woman | `0x1657D4` | Stateful branches; blocked until a declared state profile is selected |
+| Pallet Fat Man | `0x1658A7` | Supported static message circuit |
+| Professor Oak | null | No interaction in the new-game preview |
+| Mom | `0x168C81` | Stateful branch; blocked by default |
+| Daisy | `0x168DCE` | Specials/variables/flags; explicitly unsupported by the first dialogue slice |
+| Rival House Town Map | `0x168FDB` | Supported static message circuit |
+
+The two first-gate circuits are closed forms equivalent to loading one verified
+text pointer, invoking the standard NPC message box, and ending. Fat Man resolves
+to text `0x17D885` (89 bytes including the bounded terminator scan); Town Map
+resolves to `0x18D7DB` (62 bytes). Mom has a verified message branch at `0x18D449`
+(39 bytes), but her entry checks flag `0x0258` and is not normalized without an
+explicit state profile. Woman checks variable `0x4070`, variable `0x4002`, and
+flag `0x0002`; one verified branch references `0x1B1D03` (20 bytes). Daisy depends
+on multiple variables, flags and specials and therefore remains outside this
+bounded parser. These offsets and lengths are structural metadata only; extracted
+proprietary dialogue text is never versioned or logged.
+
+The supported text codec requires `0xFF` end-of-string within a configured maximum
+(at most 512 bytes for this slice). `0xFE` is newline; `0xFA`/`0xFB` are prompt
+scroll/clear; `0xFC` begins an extended control with its command-specific bounded
+operands; and `0xFD` begins a placeholder token. Unknown, truncated, or
+non-whitelisted controls fail the whole dialogue snapshot. Normal glyph bytes are
+mapped through the verified FireRed character table into semantic character
+tokens; raw source bytes are not retained in IR.
+
+The exact script gate validates the supported opcode sequence and operands,
+canonical GBA pointers, full instruction ranges, the expected standard message-box
+kind, and a terminal end command. An unexpected opcode, branch, destination,
+message kind, missing terminator, invalid text token, or modified script pointer is
+an import error. Interaction is runtime policy: the player presses the interaction
+button while cardinally adjacent and facing the target. Only a declared NPC
+dialogue may request `faceplayer`; static props never receive NPC movement logic.
+
+Primary references are `asm/macros/event.inc`, `include/constants/characters.h`
+and the selected map scripts/text declarations in `pret/pokefirered` at commit
+`c75f352304d529f6ba92d4f74b9cf8b5c3810788`. The offsets above were independently
+checked against the supported FireRed USA rev1 snapshot.

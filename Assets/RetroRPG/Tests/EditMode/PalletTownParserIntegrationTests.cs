@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using RetroRPG.Importers.GBA.Common;
 using RetroRPG.Importers.GBA.PokemonFireRed;
 using RetroRPG.IR;
+using UnityEngine;
 
 namespace RetroRPG.Tests.EditMode
 {
@@ -105,6 +107,85 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(elevationZero, Is.EqualTo(198));
             Assert.That(elevationOne, Is.EqualTo(12));
             Assert.That(elevationThree, Is.EqualTo(270));
+        }
+
+        [Test, Explicit("Requires a locally owned supported ROM through RETRO_RPG_TEST_ROM.")]
+        public void ParsesVerifiedPalletTownBundleWithFourMapsAndTransitionFlow()
+        {
+            var path = Environment.GetEnvironmentVariable("RETRO_RPG_TEST_ROM");
+            Assert.That(path, Is.Not.Null.And.Not.Empty, "Set RETRO_RPG_TEST_ROM before explicitly running this integration test.");
+
+            var result = new FireRedMapBundleParser().Parse(RomFile.Load(path));
+            Assert.That(result.Succeeded, Is.True, DescribeDiagnostics(result.Report));
+            Assert.That(result.ObjectSprites, Is.Not.Null);
+            Assert.That(result.ObjectSprites.MobileSprites, Has.Count.EqualTo(5));
+            Assert.That(result.ObjectSprites.StaticSprites, Has.Count.EqualTo(1));
+            for (var mobileIndex = 0; mobileIndex < result.ObjectSprites.MobileSprites.Count; mobileIndex++)
+            {
+                var mobile = result.ObjectSprites.MobileSprites[mobileIndex];
+                Assert.That(mobile.Width, Is.EqualTo(16));
+                Assert.That(mobile.Height, Is.EqualTo(32));
+                Assert.That(mobile.Palette, Has.Count.EqualTo(16));
+                for (var frameIndex = 0; frameIndex < mobile.Frames.Count; frameIndex++)
+                {
+                    Assert.That(mobile.Frames[frameIndex].Pixels, Has.Count.EqualTo(16 * 32));
+                }
+            }
+            Assert.That(result.ObjectSprites.TryGetStatic("prop_town_map", out var mapProp), Is.True);
+            Assert.That(mapProp.Width, Is.EqualTo(32));
+            Assert.That(mapProp.Height, Is.EqualTo(16));
+            Assert.That(mapProp.Frames, Has.Count.EqualTo(1));
+            Assert.That(result.Bundle.Maps, Has.Count.EqualTo(4));
+            Assert.That(result.Bundle.Maps[0].Id, Is.EqualTo(FireRedRomLayoutRev1.PalletTownMapId));
+
+            var expected = new Dictionary<string, Vector2Int>
+            {
+                { FireRedRomLayoutRev1.PalletTownMapId, new Vector2Int(24, 20) },
+                { FireRedRomLayoutRev1.PlayersHouse1FMapId, new Vector2Int(13, 10) },
+                { FireRedRomLayoutRev1.PlayersHouse2FMapId, new Vector2Int(12, 9) },
+                { FireRedRomLayoutRev1.RivalsHouseMapId, new Vector2Int(13, 10) },
+            };
+            var totalCells = 0;
+            var totalWarps = 0;
+            var palletTown = result.Bundle.GetMap(FireRedRomLayoutRev1.PalletTownMapId);
+            var sawOakExternal = false;
+            for (var mapIndex = 0; mapIndex < result.Bundle.Maps.Count; mapIndex++)
+            {
+                var map = result.Bundle.Maps[mapIndex];
+                Assert.That(expected.ContainsKey(map.Id), Is.True, "Unexpected map in bounded bundle: " + map.Id);
+                Assert.That(new Vector2Int(map.Width, map.Height), Is.EqualTo(expected[map.Id]));
+                Assert.That(map.Cells, Has.Count.EqualTo(map.Width * map.Height));
+                Assert.That(map.PrimaryTileset, Is.Not.Null);
+                Assert.That(map.SecondaryTileset, Is.Not.Null);
+                totalCells += map.Cells.Count;
+                totalWarps += map.Warps.Count;
+                for (var warpIndex = 0; warpIndex < map.Warps.Count; warpIndex++)
+                {
+                    var warp = map.Warps[warpIndex];
+                    Assert.That(warp.SourceX, Is.InRange(0, map.Width - 1));
+                    Assert.That(warp.SourceY, Is.InRange(0, map.Height - 1));
+                    if (warp.DestinationMapId == FireRedRomLayoutRev1.OakLabMapId) sawOakExternal = true;
+                }
+            }
+
+            Assert.That(totalCells, Is.EqualTo(848));
+            Assert.That(totalWarps, Is.EqualTo(11));
+            Assert.That(palletTown.PrimaryTileset.Id, Is.EqualTo("General"));
+            Assert.That(palletTown.SecondaryTileset.Id, Is.EqualTo("PalletTown"));
+            Assert.That(palletTown.Warps, Has.Count.EqualTo(3));
+            Assert.That(sawOakExternal, Is.True);
+            var sawOakWarning = false;
+            for (var diagnosticIndex = 0; diagnosticIndex < result.Report.Diagnostics.Count; diagnosticIndex++)
+            {
+                var diagnostic = result.Report.Diagnostics[diagnosticIndex];
+                if (diagnostic.Category == "Warp" && diagnostic.Severity == RetroRPG.Core.DiagnosticSeverity.Warning &&
+                    diagnostic.Message.Contains("Oak's Lab") && diagnostic.Message.Contains("external"))
+                {
+                    sawOakWarning = true;
+                    break;
+                }
+            }
+            Assert.That(sawOakWarning, Is.True);
         }
 
         private static string DescribeDiagnostics(RetroRPG.Core.ImportReport report)
