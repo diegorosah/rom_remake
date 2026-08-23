@@ -4,6 +4,7 @@ using System.IO;
 using NUnit.Framework;
 using RetroRPG.Unity;
 using RetroRPG.Runtime;
+using RetroRPG.Renderers.Classic2D;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -80,16 +81,32 @@ namespace RetroRPG.Tests.PlayMode
             var follow = Object.FindAnyObjectByType<PixelPerfectCameraFollow>();
             var catalog = Object.FindAnyObjectByType<RuntimeMapCatalog>();
             var transitions = Object.FindAnyObjectByType<MapTransitionSystem>();
+            var dialogueCatalog = Object.FindAnyObjectByType<DialogueCatalog>();
+            var dialogueController = Object.FindAnyObjectByType<DialogueController>();
+            var interactionSystem = Object.FindAnyObjectByType<InteractionSystem>();
+            var dialogueView = Object.FindAnyObjectByType<ClassicDialogueView>();
+            var encounterSystem = Object.FindAnyObjectByType<EncounterSystem>();
+            var encounterCatalog = Object.FindAnyObjectByType<RuntimeEncounterCatalog>();
+            var encounterView = Object.FindAnyObjectByType<ClassicEncounterDebugView>();
+            var debugMaps = Object.FindAnyObjectByType<DebugMapHotkeys>();
             Assert.That(collision, Is.Not.Null);
             Assert.That(player, Is.Not.Null);
             Assert.That(animator, Is.Not.Null);
             Assert.That(player.SpriteAnimator, Is.SameAs(animator));
             Assert.That(follow, Is.Not.Null);
             Assert.That(catalog, Is.Not.Null);
-            Assert.That(catalog.Maps, Has.Count.EqualTo(4));
+            Assert.That(catalog.Maps, Has.Count.EqualTo(5));
             Assert.That(transitions, Is.Not.Null);
             Assert.That(transitions.ActiveMap, Is.Not.Null);
             Assert.That(transitions.ActiveMap.MapId, Is.EqualTo("MAP_PALLET_TOWN"));
+            Assert.That(dialogueCatalog, Is.Not.Null);
+            Assert.That(dialogueController, Is.Not.Null);
+            Assert.That(interactionSystem, Is.Not.Null);
+            Assert.That(dialogueView, Is.Not.Null);
+            Assert.That(encounterSystem, Is.Not.Null);
+            Assert.That(encounterCatalog, Is.Not.Null);
+            Assert.That(encounterView, Is.Not.Null);
+            Assert.That(debugMaps, Is.Not.Null);
             Assert.That(transitions.ActiveMap.Npcs, Has.Count.EqualTo(3));
             Assert.That(transitions.ActiveMap.Occupancy, Is.Not.Null);
             Assert.That(transitions.ActiveMap.GetComponent<NpcSimulationDriver>(), Is.Not.Null);
@@ -102,6 +119,68 @@ namespace RetroRPG.Tests.PlayMode
                 if (npc.IsVisible) visiblePalletNpcs++;
             }
             Assert.That(visiblePalletNpcs, Is.EqualTo(2));
+
+            NpcController dialogueNpc = null;
+            for (var npcIndex = 0; npcIndex < transitions.ActiveMap.Npcs.Count; npcIndex++)
+            {
+                if (transitions.ActiveMap.Npcs[npcIndex].NpcId == "MAP_PALLET_TOWN:object:2")
+                {
+                    dialogueNpc = transitions.ActiveMap.Npcs[npcIndex];
+                    break;
+                }
+            }
+            Assert.That(dialogueNpc, Is.Not.Null);
+            dialogueNpc.CancelPendingMove();
+            var npcDriver = transitions.ActiveMap.NpcSimulationDriver;
+            npcDriver.SetSuspended(true);
+            var interactionPositioned = false;
+            foreach (var direction in new[] { GridDirection.Right, GridDirection.Left, GridDirection.Up, GridDirection.Down })
+            {
+                var candidate = dialogueNpc.CurrentCell - GridDirections.ToOffset(direction);
+                if (!collision.IsInBounds(candidate) || collision.GetCollision(candidate) != 0 || transitions.ActiveMap.Occupancy.IsOccupied(candidate)) continue;
+                player.PlaceAfterTransition(collision, candidate, dialogueNpc.Elevation, direction, transitions.ActiveMap.Occupancy);
+                interactionPositioned = true;
+                break;
+            }
+            Assert.That(interactionPositioned, Is.True, "Fat Man must have an adjacent interaction cell.");
+            npcDriver.SetSuspended(false);
+            player.InputEnabled = true;
+            Assert.That(interactionSystem.TryInteract(), Is.True);
+            Assert.That(dialogueController.IsOpen, Is.True);
+            Assert.That(dialogueView.IsVisible, Is.True);
+            Assert.That(player.InputEnabled, Is.False);
+            Assert.That(npcDriver.IsSuspended, Is.True);
+            for (var advance = 0; advance < 8 && dialogueController.IsOpen; advance++)
+            {
+                dialogueController.Advance(10f);
+                dialogueController.AdvanceOrClose();
+            }
+            Assert.That(dialogueController.IsOpen, Is.False);
+            Assert.That(player.InputEnabled, Is.True);
+            Assert.That(npcDriver.IsSuspended, Is.False);
+            Assert.That(dialogueView.IsVisible, Is.False);
+            var encounterCount = 0;
+            encounterSystem.SetRandomSource(new ZeroEncounterRandom());
+            encounterSystem.EncounterTriggered += _ => encounterCount++;
+            Assert.That(debugMaps.EnterRoute(), Is.True);
+            Assert.That(transitions.ActiveMap.MapId, Is.EqualTo("MAP_ROUTE1"));
+            var routeCollision = transitions.ActiveMap.CollisionMap;
+            var encounterStepFound = false;
+            foreach (var direction in new[] { GridDirection.Right, GridDirection.Left, GridDirection.Up, GridDirection.Down })
+            {
+                if (!routeCollision.CanMove(player.CurrentCell, player.Elevation, direction, out var next, out var nextElevation) ||
+                    !encounterCatalog.TryResolve("MAP_ROUTE1", next, nextElevation, out _, out _)) continue;
+                Assert.That(player.TryMove(direction), Is.True);
+                player.Advance(1f / player.CellsPerSecond);
+                encounterStepFound = true;
+                break;
+            }
+            Assert.That(encounterStepFound, Is.True, "Debug Route 1 spawn must have an adjacent encounter cell.");
+            Assert.That(encounterCount, Is.EqualTo(1));
+            Assert.That(encounterView.LastMessage, Does.Contain("species:"));
+            Assert.That(debugMaps.ReturnToTown(), Is.True);
+            Assert.That(transitions.ActiveMap.MapId, Is.EqualTo("MAP_PALLET_TOWN"));
+
             for (var mapIndex = 0; mapIndex < catalog.Maps.Count; mapIndex++)
             {
                 var runtimeMap = catalog.Maps[mapIndex];
@@ -211,6 +290,11 @@ namespace RetroRPG.Tests.PlayMode
                 animationData.animatedSprites[secondFrame],
                 Is.Not.SameAs(animationData.animatedSprites[firstFrame]),
                 "Animated tile did not select a different sprite frame.");
+        }
+
+        private sealed class ZeroEncounterRandom : IEncounterRandomSource
+        {
+            public int NextInt(int exclusiveUpperBound) { return 0; }
         }
     }
 }

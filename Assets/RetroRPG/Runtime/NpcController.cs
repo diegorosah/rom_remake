@@ -7,9 +7,10 @@ namespace RetroRPG.Runtime
     /// A game-agnostic grid NPC. It owns no dialogue, script, ROM, or importer data;
     /// those systems may safely call <see cref="Face"/> later without moving the NPC.
     /// </summary>
-    public sealed class NpcController : MonoBehaviour
+    public sealed class NpcController : MonoBehaviour, IInteractionTarget, IInteractionFacingTarget
     {
         [SerializeField] private string npcId;
+        [SerializeField] private string interactionKey;
         [SerializeField] private GridCollisionMap collisionMap;
         [SerializeField] private MapCellOccupancy occupancy;
         [SerializeField] private DirectionalSpriteAnimator spriteAnimator;
@@ -36,6 +37,11 @@ namespace RetroRPG.Runtime
         private INpcTickSource tickSource;
 
         public string NpcId => npcId;
+        public string InteractionKey => interactionKey;
+        public Vector2Int InteractionCell => currentCell;
+        public byte InteractionElevation => elevation;
+        public bool IsInteractionAvailable => isConfigured && isMapActive && isVisible && !isMoving && isActiveAndEnabled &&
+                                              !string.IsNullOrWhiteSpace(interactionKey);
         public GridCollisionMap CollisionMap => collisionMap;
         public MapCellOccupancy Occupancy => occupancy;
         public DirectionalSpriteAnimator SpriteAnimator => spriteAnimator;
@@ -159,6 +165,16 @@ namespace RetroRPG.Runtime
             movementPattern = configuredPattern ?? throw new ArgumentNullException(nameof(configuredPattern));
         }
 
+        public void ConfigureInteraction(string configuredInteractionKey)
+        {
+            if (string.IsNullOrWhiteSpace(configuredInteractionKey))
+            {
+                throw new ArgumentException("An interaction key is required.", nameof(configuredInteractionKey));
+            }
+
+            interactionKey = configuredInteractionKey;
+        }
+
         public void SetTickSource(INpcTickSource configuredTickSource)
         {
             tickSource = configuredTickSource;
@@ -207,6 +223,14 @@ namespace RetroRPG.Runtime
             facing = direction;
             SynchronizeAnimator();
             return true;
+        }
+
+        public void FaceInteractor(GridDirection interactorFacing)
+        {
+            if (GridDirections.IsCardinal(interactorFacing))
+            {
+                Face(GridDirections.Opposite(interactorFacing));
+            }
         }
 
         public bool TryMove(GridDirection direction)

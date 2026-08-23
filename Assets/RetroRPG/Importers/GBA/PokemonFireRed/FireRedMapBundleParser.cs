@@ -9,15 +9,27 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
     public sealed class FireRedMapBundleParseResult
     {
         public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ImportReport report)
-            : this(bundle, playerSprite, null, report)
+            : this(bundle, playerSprite, null, null, null, report)
         {
         }
 
         public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, ImportReport report)
+            : this(bundle, playerSprite, objectSprites, null, null, report)
+        {
+        }
+
+        public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, DialogueCatalogDefinition dialogueCatalog, ImportReport report)
+            : this(bundle, playerSprite, objectSprites, dialogueCatalog, null, report)
+        {
+        }
+
+        public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, DialogueCatalogDefinition dialogueCatalog, EncounterCatalogDefinition encounterCatalog, ImportReport report)
         {
             Bundle = bundle;
             PlayerSprite = playerSprite;
             ObjectSprites = objectSprites;
+            DialogueCatalog = dialogueCatalog;
+            EncounterCatalog = encounterCatalog;
             Report = report ?? throw new ArgumentNullException(nameof(report));
         }
 
@@ -25,8 +37,10 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public OverworldSpriteDefinition PlayerSprite { get; }
         public ObjectSpriteCatalogDefinition ObjectSprites { get; }
         public ObjectSpriteCatalogDefinition ObjectSpriteCatalog => ObjectSprites;
+        public DialogueCatalogDefinition DialogueCatalog { get; }
+        public EncounterCatalogDefinition EncounterCatalog { get; }
         public ImportReport Report { get; }
-        public bool Succeeded => Bundle != null && PlayerSprite != null && ObjectSprites != null && !Report.HasErrors;
+        public bool Succeeded => Bundle != null && PlayerSprite != null && ObjectSprites != null && DialogueCatalog != null && EncounterCatalog != null && !Report.HasErrors;
     }
 
     /// <summary>Bounds-safe parser for the deliberately small Pallet Town transition bundle.</summary>
@@ -71,19 +85,26 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             try
             {
                 var tilesets = new Dictionary<string, TilesetDefinition>(StringComparer.Ordinal);
-                var maps = new List<MapDefinition>(FireRedRomLayoutRev1.SelectedMapSpecs.Count);
+                var maps = new List<MapDefinition>(FireRedRomLayoutRev1.SelectedMapSpecs.Count + 1);
                 for (var index = 0; index < FireRedRomLayoutRev1.SelectedMapSpecs.Count; index++)
                 {
                     maps.Add(ParseMap(reader, FireRedRomLayoutRev1.SelectedMapSpecs[index], tilesets));
                 }
 
+                var route1 = ParseMap(reader, FireRedRomLayoutRev1.Route1MapSpec, tilesets);
+                maps.Add(route1);
+
                 var bundle = new MapBundleDefinition(maps, new[] { FireRedRomLayoutRev1.OakLabMapId });
                 var playerSprite = PlayerRedNormalParser.Parse(reader);
                 var objectSprites = ObjectEventSpriteDecoder.Decode(reader);
-                report.Add(new ParseDiagnostic("MapBundle", DiagnosticSeverity.Info, "Parsed Pallet Town and three interior maps (848 cells, 11 warp records).", FireRedRomLayoutRev1.PalletTownMapHeader, FireRedRomLayoutRev1.MapHeaderSize));
+                var dialogues = FireRedDialogueDecoder.Decode(reader, report);
+                var encounters = FireRedRoute1EncounterParser.Parse(reader, route1);
+                report.Add(new ParseDiagnostic("MapBundle", DiagnosticSeverity.Info, "Parsed Pallet Town, three interior maps, and Route 1 (1,808 cells, 11 warp records).", FireRedRomLayoutRev1.PalletTownMapHeader, FireRedRomLayoutRev1.MapHeaderSize));
+                report.Add(new ParseDiagnostic("ObjectEvent", DiagnosticSeverity.Warning, "Route 1 object-event records were bounds-validated but intentionally omitted because no MVP 4 object whitelist is declared for them.", FireRedRomLayoutRev1.Route1Events, FireRedRomLayoutRev1.MapEventsSize));
+                report.Add(new ParseDiagnostic("Encounter", DiagnosticSeverity.Info, "Parsed the audited Route 1 land encounter zone (178 cells, 12 weighted slots).", FireRedRomLayoutRev1.Route1WildHeader, FireRedRomLayoutRev1.WildPokemonHeaderSize));
                 report.Add(new ParseDiagnostic("Warp", DiagnosticSeverity.Warning, "Oak's Lab is intentionally external to this bundle; its Pallet Town warp remains unresolved.", FireRedRomLayoutRev1.PalletTownEvents, FireRedRomLayoutRev1.MapEventsSize));
                 report.Add(new ParseDiagnostic("PlayerSprite", DiagnosticSeverity.Info, "Parsed the normal on-foot player sprite (9 frames, 8 animations).", FireRedRomLayoutRev1.PlayerRedNormalGraphicsInfo, FireRedRomLayoutRev1.ObjectEventGraphicsInfoSize));
-                return new FireRedMapBundleParseResult(bundle, playerSprite, objectSprites, report);
+                return new FireRedMapBundleParseResult(bundle, playerSprite, objectSprites, dialogues, encounters, report);
             }
             catch (RomReadException exception)
             {
@@ -108,7 +129,9 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             var secondary = GetTileset(reader, spec.SecondaryTileset, tilesets);
             var cells = ParseCells(reader, spec, primary, secondary);
             var warps = ParseWarps(reader, spec, cells, primary, secondary);
-            FireRedObjectEventParser.Parse(reader, spec, cells, out var npcs, out var props);
+            var npcs = new List<NpcDefinition>();
+            var props = new List<StaticMapPropDefinition>();
+            if (spec.ImportObjectEvents) FireRedObjectEventParser.Parse(reader, spec, cells, out npcs, out props);
             return new MapDefinition(spec.Id, spec.Name, spec.Width, spec.Height, cells, primary, secondary, warps, npcs, props);
         }
 

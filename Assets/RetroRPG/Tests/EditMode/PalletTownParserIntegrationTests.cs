@@ -135,7 +135,13 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(mapProp.Width, Is.EqualTo(32));
             Assert.That(mapProp.Height, Is.EqualTo(16));
             Assert.That(mapProp.Frames, Has.Count.EqualTo(1));
-            Assert.That(result.Bundle.Maps, Has.Count.EqualTo(4));
+            Assert.That(result.DialogueCatalog, Is.Not.Null);
+            Assert.That(result.DialogueCatalog.Dialogues, Has.Count.EqualTo(2));
+            Assert.That(result.DialogueCatalog.TryGetForTarget(FireRedRomLayoutRev1.PalletTownMapId + ":object:2", out var fatManDialogue), Is.True);
+            Assert.That(fatManDialogue.FacePlayer, Is.True);
+            Assert.That(result.DialogueCatalog.TryGetForTarget(FireRedRomLayoutRev1.RivalsHouseMapId + ":object:2", out var townMapDialogue), Is.True);
+            Assert.That(townMapDialogue.FacePlayer, Is.False);
+            Assert.That(result.Bundle.Maps, Has.Count.EqualTo(5));
             Assert.That(result.Bundle.Maps[0].Id, Is.EqualTo(FireRedRomLayoutRev1.PalletTownMapId));
 
             var expected = new Dictionary<string, Vector2Int>
@@ -144,6 +150,7 @@ namespace RetroRPG.Tests.EditMode
                 { FireRedRomLayoutRev1.PlayersHouse1FMapId, new Vector2Int(13, 10) },
                 { FireRedRomLayoutRev1.PlayersHouse2FMapId, new Vector2Int(12, 9) },
                 { FireRedRomLayoutRev1.RivalsHouseMapId, new Vector2Int(13, 10) },
+                { FireRedRomLayoutRev1.Route1MapId, new Vector2Int(24, 40) },
             };
             var totalCells = 0;
             var totalWarps = 0;
@@ -168,7 +175,7 @@ namespace RetroRPG.Tests.EditMode
                 }
             }
 
-            Assert.That(totalCells, Is.EqualTo(848));
+            Assert.That(totalCells, Is.EqualTo(1808));
             Assert.That(totalWarps, Is.EqualTo(11));
             Assert.That(palletTown.PrimaryTileset.Id, Is.EqualTo("General"));
             Assert.That(palletTown.SecondaryTileset.Id, Is.EqualTo("PalletTown"));

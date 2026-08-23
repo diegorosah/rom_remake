@@ -1,7 +1,7 @@
 {
   "name": "RetroRPG.Tests.PlayMode",
   "rootNamespace": "RetroRPG.Tests.PlayMode",
-  "references": ["RetroRPG.Unity", "RetroRPG.Runtime"],
+  "references": ["RetroRPG.Unity", "RetroRPG.Runtime", "RetroRPG.Renderers.Classic2D"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

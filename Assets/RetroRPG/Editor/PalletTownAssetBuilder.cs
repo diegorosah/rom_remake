@@ -6,6 +6,7 @@ using System.Text;
 using RetroRPG.Core;
 using RetroRPG.IR;
 using RetroRPG.Runtime;
+using RetroRPG.Renderers.Classic2D;
 using RetroRPG.Unity;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -13,6 +14,7 @@ using UnityEngine;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
+using UnityEngine.UI;
 
 namespace RetroRPG.Editor
 {
@@ -396,11 +398,38 @@ namespace RetroRPG.Editor
             ImportReport report,
             Func<string, float, bool> shouldCancel)
         {
+            Import(bundle, playerSprite, objectSprites, null, report, shouldCancel);
+        }
+
+        /// <summary>Imports maps, actors and bounded dialogue content as one validated snapshot.</summary>
+        public static void Import(
+            MapBundleDefinition bundle,
+            OverworldSpriteDefinition playerSprite,
+            ObjectSpriteCatalogDefinition objectSprites,
+            DialogueCatalogDefinition dialogueCatalog,
+            ImportReport report,
+            Func<string, float, bool> shouldCancel)
+        {
+            Import(bundle, playerSprite, objectSprites, dialogueCatalog, null, report, shouldCancel);
+        }
+
+        /// <summary>Imports the complete bounded exploration snapshot including Route 1 encounters.</summary>
+        public static void Import(
+            MapBundleDefinition bundle,
+            OverworldSpriteDefinition playerSprite,
+            ObjectSpriteCatalogDefinition objectSprites,
+            DialogueCatalogDefinition dialogueCatalog,
+            EncounterCatalogDefinition encounterCatalog,
+            ImportReport report,
+            Func<string, float, bool> shouldCancel)
+        {
             if (report == null) throw new ArgumentNullException(nameof(report));
             if (report.HasErrors) throw new InvalidOperationException("An import report with errors cannot generate assets.");
             ThrowIfCancelled(shouldCancel, "Validating IR", 0.05f);
             Validate(bundle, playerSprite);
             if (objectSprites != null) ObjectEventAssetBuilder.Validate(bundle, objectSprites);
+            if (dialogueCatalog != null) ValidateDialogues(bundle, dialogueCatalog);
+            if (encounterCatalog != null) ValidateEncounters(bundle, encounterCatalog);
 
             // All object discovery and JSON construction completes before generated assets are touched.
             var contexts = new List<BuildContext>(bundle.Maps.Count);
@@ -443,7 +472,7 @@ namespace RetroRPG.Editor
                 }
                 FindPalletTownContext(contexts).WritePlayerSprites(owned);
                 var objectAssets = objectSprites == null ? null : ObjectEventAssetBuilder.WriteAssets(objectSprites, owned);
-                CreateScene(contexts, objectAssets, owned);
+                CreateScene(contexts, objectAssets, dialogueCatalog, encounterCatalog, owned);
                 owned.Add(ManifestPath);
                 WriteText(ManifestPath, JsonUtility.ToJson(new ImportManifest { schemaVersion = 3, ownedAssets = ToArray(owned) }, true) + "\n");
                 RemoveStaleOwnedAssets(priorManifest, owned);
@@ -499,7 +528,12 @@ namespace RetroRPG.Editor
             return DeterministicJson.SerializeReport(report);
         }
 
-        private static void CreateScene(IList<BuildContext> contexts, ObjectEventAssetBuilder.Assets objectAssets, ISet<string> owned)
+        private static void CreateScene(
+            IList<BuildContext> contexts,
+            ObjectEventAssetBuilder.Assets objectAssets,
+            DialogueCatalogDefinition dialogueDefinitions,
+            EncounterCatalogDefinition encounterDefinitions,
+            ISet<string> owned)
         {
             Scene scene = File.Exists(ToAbsolutePath(ScenePath))
                 ? EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single)
@@ -508,6 +542,7 @@ namespace RetroRPG.Editor
             var mapsObject = FindRootObjectOrNull(scene, "Maps") ?? new GameObject("Maps");
             MigrateLegacyPalletTownRoot(scene, mapsObject.transform);
             var mapRoots = new List<MapRuntimeRoot>(contexts.Count);
+            var mapInteractionCatalogs = new List<MapInteractionCatalog>(contexts.Count);
             MapRuntimeRoot palletTownRoot = null;
             for (var contextIndex = 0; contextIndex < contexts.Count; contextIndex++)
             {
@@ -533,13 +568,19 @@ namespace RetroRPG.Editor
                 occupancy.Configure(collisionMap);
 
                 var runtimeWarps = CreateRuntimeWarps(context.Map);
-                var runtimeNpcs = objectAssets == null
-                    ? new List<NpcController>()
+                var mapObjects = objectAssets == null
+                    ? null
                     : ObjectEventAssetBuilder.CreateMapObjects(context.Map, root.transform, collisionMap, occupancy, objectAssets);
+                var runtimeNpcs = mapObjects == null ? new List<NpcController>() : mapObjects.Npcs;
                 var mapRoot = GetOrAddComponent<MapRuntimeRoot>(root);
                 mapRoot.Configure(context.Map.Id, collisionMap, runtimeWarps, occupancy, runtimeNpcs);
                 var npcSimulation = GetOrAddComponent<NpcSimulationDriver>(root);
                 npcSimulation.Configure(mapRoot);
+                var mapInteractions = GetOrAddComponent<MapInteractionCatalog>(root);
+                mapInteractions.Configure(
+                    mapRoot,
+                    mapObjects == null ? new List<MonoBehaviour>() : mapObjects.InteractionTargets);
+                mapInteractionCatalogs.Add(mapInteractions);
                 mapRoots.Add(mapRoot);
                 if (string.Equals(context.Map.Id, "MAP_PALLET_TOWN", StringComparison.Ordinal)) palletTownRoot = mapRoot;
             }
@@ -581,11 +622,302 @@ namespace RetroRPG.Editor
             catalog.Configure(mapRoots);
             var transitions = GetOrAddComponent<MapTransitionSystem>(runtimeObject);
             transitions.Configure(catalog, playerController, follow, palletTownRoot);
+            var runtimeInteractions = GetOrAddComponent<RuntimeInteractionCatalog>(runtimeObject);
+            runtimeInteractions.Configure(mapInteractionCatalogs);
+            var runtimeDialogues = GetOrAddComponent<RetroRPG.Runtime.DialogueCatalog>(runtimeObject);
+            runtimeDialogues.Configure(CreateRuntimeDialogues(contexts, dialogueDefinitions));
+            var dialogueView = CreateDialogueUi(scene);
+            var dialogueController = GetOrAddComponent<DialogueController>(runtimeObject);
+            dialogueController.Configure(runtimeDialogues, playerController, dialogueView);
+            var interactionSystem = GetOrAddComponent<InteractionSystem>(runtimeObject);
+            interactionSystem.Configure(playerController, transitions, catalog, runtimeInteractions, dialogueController);
+            var runtimeEncounters = GetOrAddComponent<RuntimeEncounterCatalog>(runtimeObject);
+            CreateRuntimeEncounters(contexts, encounterDefinitions, out var encounterTables, out var encounterCells);
+            runtimeEncounters.Configure(encounterTables, encounterCells);
+            var encounterView = CreateEncounterDebugUi(scene);
+            var encounterSystem = GetOrAddComponent<EncounterSystem>(runtimeObject);
+            encounterSystem.Configure(
+                playerController,
+                transitions,
+                catalog,
+                runtimeEncounters,
+                dialogueController,
+                null,
+                encounterView);
+            if (encounterCells.Count > 0)
+            {
+                var debugMaps = GetOrAddComponent<DebugMapHotkeys>(runtimeObject);
+                var routeCell = encounterCells[0];
+                debugMaps.Configure(
+                    transitions,
+                    routeCell.MapId,
+                    routeCell.Cell,
+                    routeCell.Elevation,
+                    palletTownRoot.MapId,
+                    PlayerSpawnCell,
+                    3);
+            }
             follow.ApplyFollow();
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
             owned.Add(ScenePath);
+        }
+
+        private static void ValidateDialogues(MapBundleDefinition bundle, DialogueCatalogDefinition catalog)
+        {
+            var interactions = new Dictionary<string, string>(StringComparer.Ordinal);
+            var usedInteractionKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (var mapIndex = 0; mapIndex < bundle.Maps.Count; mapIndex++)
+            {
+                var map = bundle.Maps[mapIndex];
+                for (var npcIndex = 0; npcIndex < map.Npcs.Count; npcIndex++) interactions.Add(map.Npcs[npcIndex].EventId, map.Npcs[npcIndex].InteractionKey);
+                for (var propIndex = 0; propIndex < map.Props.Count; propIndex++) interactions.Add(map.Props[propIndex].EventId, map.Props[propIndex].InteractionKey);
+            }
+
+            for (var index = 0; index < catalog.Dialogues.Count; index++)
+            {
+                var dialogue = catalog.Dialogues[index];
+                if (!interactions.TryGetValue(dialogue.TargetEventId, out var key) || string.Equals(key, "none", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Dialogue target is not present or interactive in the selected map bundle: " + dialogue.TargetEventId + ".");
+                }
+                if (!usedInteractionKeys.Add(key)) throw new InvalidOperationException("Supported dialogues must use unique interaction keys.");
+                ConvertDialoguePages(dialogue);
+            }
+        }
+
+        private static void ValidateEncounters(MapBundleDefinition bundle, EncounterCatalogDefinition catalog)
+        {
+            var maps = new Dictionary<string, MapDefinition>(StringComparer.Ordinal);
+            for (var mapIndex = 0; mapIndex < bundle.Maps.Count; mapIndex++) maps.Add(bundle.Maps[mapIndex].Id, bundle.Maps[mapIndex]);
+            for (var tableIndex = 0; tableIndex < catalog.Tables.Count; tableIndex++)
+            {
+                var table = catalog.Tables[tableIndex];
+                if (!maps.ContainsKey(table.MapId) || table.TotalWeight != 100 || table.BaseRate < 0 || table.BaseRate > 100)
+                {
+                    throw new InvalidOperationException("Encounter table is not valid for the selected bundle: " + table.Id + ".");
+                }
+            }
+
+            for (var zoneIndex = 0; zoneIndex < catalog.Zones.Count; zoneIndex++)
+            {
+                var zone = catalog.Zones[zoneIndex];
+                if (!maps.TryGetValue(zone.MapId, out var map)) throw new InvalidOperationException("Encounter zone map is outside the selected bundle.");
+                var hasTable = false;
+                for (var tableIndex = 0; tableIndex < catalog.Tables.Count; tableIndex++)
+                {
+                    var table = catalog.Tables[tableIndex];
+                    if (table.MapId == zone.MapId && table.Method == zone.Method) { hasTable = true; break; }
+                }
+                if (!hasTable) throw new InvalidOperationException("Encounter zone has no matching table.");
+                for (var cellIndex = 0; cellIndex < zone.Cells.Count; cellIndex++)
+                {
+                    var cell = zone.Cells[cellIndex];
+                    if (cell.X >= map.Width || cell.Y >= map.Height) throw new InvalidOperationException("Encounter zone contains a cell outside its map.");
+                }
+            }
+        }
+
+        private static List<RetroRPG.Runtime.DialogueDefinition> CreateRuntimeDialogues(
+            IList<BuildContext> contexts,
+            DialogueCatalogDefinition catalog)
+        {
+            var result = new List<RetroRPG.Runtime.DialogueDefinition>();
+            if (catalog == null) return result;
+            var interactionByEvent = new Dictionary<string, string>(StringComparer.Ordinal);
+            for (var contextIndex = 0; contextIndex < contexts.Count; contextIndex++)
+            {
+                var map = contexts[contextIndex].Map;
+                for (var i = 0; i < map.Npcs.Count; i++) interactionByEvent.Add(map.Npcs[i].EventId, map.Npcs[i].InteractionKey);
+                for (var i = 0; i < map.Props.Count; i++) interactionByEvent.Add(map.Props[i].EventId, map.Props[i].InteractionKey);
+            }
+
+            for (var dialogueIndex = 0; dialogueIndex < catalog.Dialogues.Count; dialogueIndex++)
+            {
+                var source = catalog.Dialogues[dialogueIndex];
+                result.Add(new RetroRPG.Runtime.DialogueDefinition(
+                    interactionByEvent[source.TargetEventId],
+                    ConvertDialoguePages(source),
+                    30f,
+                    source.FacePlayer));
+            }
+            return result;
+        }
+
+        private static List<string> ConvertDialoguePages(RetroRPG.IR.DialogueDefinition source)
+        {
+            var pages = new List<string>();
+            for (var pageIndex = 0; pageIndex < source.Pages.Count; pageIndex++)
+            {
+                var builder = new StringBuilder();
+                var tokens = source.Pages[pageIndex].Tokens;
+                for (var tokenIndex = 0; tokenIndex < tokens.Count; tokenIndex++)
+                {
+                    var token = tokens[tokenIndex];
+                    switch (token.Kind)
+                    {
+                        case DialogueTokenKind.Glyph: builder.Append(token.Value); break;
+                        case DialogueTokenKind.Newline: builder.Append('\n'); break;
+                        case DialogueTokenKind.Placeholder: builder.Append('<').Append(token.Value).Append('>'); break;
+                        case DialogueTokenKind.PromptScroll:
+                        case DialogueTokenKind.PromptClear:
+                            pages.Add(builder.ToString());
+                            builder.Length = 0;
+                            break;
+                    }
+                }
+                if (builder.Length > 0 || pages.Count == 0) pages.Add(builder.ToString());
+            }
+            return pages;
+        }
+
+        private static void CreateRuntimeEncounters(
+            IList<BuildContext> contexts,
+            EncounterCatalogDefinition catalog,
+            out List<RetroRPG.Runtime.EncounterTableDefinition> tables,
+            out List<EncounterCellDefinition> cells)
+        {
+            tables = new List<RetroRPG.Runtime.EncounterTableDefinition>();
+            cells = new List<EncounterCellDefinition>();
+            if (catalog == null) return;
+
+            var maps = new Dictionary<string, MapDefinition>(StringComparer.Ordinal);
+            for (var i = 0; i < contexts.Count; i++) maps.Add(contexts[i].Map.Id, contexts[i].Map);
+            for (var tableIndex = 0; tableIndex < catalog.Tables.Count; tableIndex++)
+            {
+                var source = catalog.Tables[tableIndex];
+                var slots = new List<EncounterSlotDefinition>(source.Entries.Count);
+                for (var slotIndex = 0; slotIndex < source.Entries.Count; slotIndex++)
+                {
+                    var entry = source.Entries[slotIndex];
+                    slots.Add(new EncounterSlotDefinition(
+                        "species:" + entry.SpeciesId.ToString(CultureInfo.InvariantCulture),
+                        entry.Weight,
+                        entry.MinimumLevel,
+                        entry.MaximumLevel));
+                }
+                tables.Add(new RetroRPG.Runtime.EncounterTableDefinition(
+                    source.Id,
+                    checked(source.BaseRate * 100),
+                    slots));
+            }
+
+            for (var zoneIndex = 0; zoneIndex < catalog.Zones.Count; zoneIndex++)
+            {
+                var zone = catalog.Zones[zoneIndex];
+                if (!maps.TryGetValue(zone.MapId, out var map)) throw new InvalidOperationException("Encounter zone references a map outside the generated bundle.");
+                string tableId = null;
+                for (var tableIndex = 0; tableIndex < catalog.Tables.Count; tableIndex++)
+                {
+                    var candidate = catalog.Tables[tableIndex];
+                    if (candidate.MapId == zone.MapId && candidate.Method == zone.Method) { tableId = candidate.Id; break; }
+                }
+                if (tableId == null) throw new InvalidOperationException("Encounter zone has no matching table.");
+                for (var cellIndex = 0; cellIndex < zone.Cells.Count; cellIndex++)
+                {
+                    var sourceCell = zone.Cells[cellIndex];
+                    if (sourceCell.X >= map.Width || sourceCell.Y >= map.Height) throw new InvalidOperationException("Encounter cell is outside its map.");
+                    var mapCell = map.Cells[(sourceCell.Y * map.Width) + sourceCell.X];
+                    cells.Add(new EncounterCellDefinition(
+                        map.Id,
+                        new Vector2Int(sourceCell.X, map.Height - 1 - sourceCell.Y),
+                        checked((byte)mapCell.Elevation),
+                        tableId,
+                        true));
+                }
+            }
+        }
+
+        private static ClassicDialogueView CreateDialogueUi(Scene scene)
+        {
+            var root = FindRootObjectOrNull(scene, "Classic Dialogue UI") ?? new GameObject("Classic Dialogue UI");
+            var canvas = GetOrAddComponent<Canvas>(root);
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 100;
+            var scaler = GetOrAddComponent<CanvasScaler>(root);
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(240f, 160f);
+            scaler.matchWidthOrHeight = 0.5f;
+            GetOrAddComponent<GraphicRaycaster>(root);
+            var panel = GetOrCreateUiChild(root.transform, "Dialogue Panel");
+            var panelRect = (RectTransform)panel.transform;
+            panelRect.anchorMin = new Vector2(0.04f, 0.03f);
+            panelRect.anchorMax = new Vector2(0.96f, 0.36f);
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+            var image = GetOrAddComponent<Image>(panel);
+            image.color = new Color(0.03f, 0.04f, 0.08f, 0.94f);
+            var group = GetOrAddComponent<CanvasGroup>(panel);
+
+            var textObject = GetOrCreateUiChild(panel.transform, "Text");
+            var textRect = (RectTransform)textObject.transform;
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(8f, 6f);
+            textRect.offsetMax = new Vector2(-8f, -6f);
+            var text = GetOrAddComponent<Text>(textObject);
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            text.fontSize = 9;
+            text.color = Color.white;
+            text.alignment = TextAnchor.UpperLeft;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+
+            var promptObject = GetOrCreateUiChild(panel.transform, "Advance Prompt");
+            var promptRect = (RectTransform)promptObject.transform;
+            promptRect.anchorMin = new Vector2(1f, 0f);
+            promptRect.anchorMax = new Vector2(1f, 0f);
+            promptRect.pivot = new Vector2(1f, 0f);
+            promptRect.anchoredPosition = new Vector2(-4f, 3f);
+            promptRect.sizeDelta = new Vector2(12f, 12f);
+            var prompt = GetOrAddComponent<Text>(promptObject);
+            prompt.font = text.font;
+            prompt.fontSize = 8;
+            prompt.color = Color.white;
+            prompt.alignment = TextAnchor.MiddleCenter;
+
+            var view = GetOrAddComponent<ClassicDialogueView>(root);
+            view.Configure(group, text, prompt);
+            return view;
+        }
+
+        private static ClassicEncounterDebugView CreateEncounterDebugUi(Scene scene)
+        {
+            var root = FindRootObjectOrNull(scene, "Classic Dialogue UI") ?? new GameObject("Classic Dialogue UI");
+            var panel = GetOrCreateUiChild(root.transform, "Encounter Debug Panel");
+            var rect = (RectTransform)panel.transform;
+            rect.anchorMin = new Vector2(0.2f, 0.78f);
+            rect.anchorMax = new Vector2(0.8f, 0.94f);
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            var image = GetOrAddComponent<Image>(panel);
+            image.color = new Color(0.12f, 0.04f, 0.04f, 0.92f);
+            var group = GetOrAddComponent<CanvasGroup>(panel);
+            var labelObject = GetOrCreateUiChild(panel.transform, "Label");
+            var labelRect = (RectTransform)labelObject.transform;
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = new Vector2(4f, 2f);
+            labelRect.offsetMax = new Vector2(-4f, -2f);
+            var label = GetOrAddComponent<Text>(labelObject);
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = 9;
+            label.color = Color.white;
+            label.alignment = TextAnchor.MiddleCenter;
+            var view = GetOrAddComponent<ClassicEncounterDebugView>(panel);
+            view.Configure(group, label);
+            return view;
+        }
+
+        private static GameObject GetOrCreateUiChild(Transform parent, string name)
+        {
+            var existing = parent.Find(name);
+            if (existing != null && existing is RectTransform) return existing.gameObject;
+            if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+            var created = new GameObject(name, typeof(RectTransform));
+            created.transform.SetParent(parent, false);
+            return created;
         }
 
         private static List<MapRuntimeWarp> CreateRuntimeWarps(MapDefinition map)

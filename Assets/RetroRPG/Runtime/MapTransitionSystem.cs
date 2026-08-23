@@ -83,6 +83,40 @@ namespace RetroRPG.Runtime
             }
         }
 
+        /// <summary>Editor/debug entry point for a selected, already-loaded map without inventing a ROM warp.</summary>
+        public bool TryActivateMapImmediately(
+            string destinationMapId,
+            Vector2Int destinationCell,
+            byte destinationElevation,
+            GridDirection destinationFacing)
+        {
+            if (isTransitioning || mapCatalog == null || player == null ||
+                !mapCatalog.TryResolve(destinationMapId, out MapRuntimeRoot destination) ||
+                destination.CollisionMap == null || !destination.CollisionMap.IsInBounds(destinationCell) ||
+                destination.CollisionMap.GetCollision(destinationCell) != 0 ||
+                !GridDirections.IsCardinal(destinationFacing))
+            {
+                return false;
+            }
+
+            player.CancelPendingMove();
+            if (activeMap != null && activeMap != destination) activeMap.SetRuntimeActive(false);
+            destination.SetRuntimeActive(true);
+            activeMap = destination;
+            suppressArrivalWarp = false;
+            suppressedMapId = null;
+            suppressedWarpId = null;
+            player.PlaceAfterTransition(
+                destination.CollisionMap,
+                destinationCell,
+                destinationElevation,
+                destinationFacing,
+                destination.Occupancy);
+            RebindCamera();
+            lastFailure = null;
+            return true;
+        }
+
         /// <summary>
         /// Intercepts a matching map-local warp before the player asks normal grid
         /// collision. A matching but malformed warp is also consumed, so a bad map

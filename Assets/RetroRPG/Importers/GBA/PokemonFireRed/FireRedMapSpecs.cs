@@ -8,6 +8,11 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
     public sealed class FireRedMapSpec
     {
         public FireRedMapSpec(string id, string name, int mapGroup, int mapNumber, int mapGroupPointerOffset, int headerOffset, int layoutOffset, int eventsOffset, int layoutId, int width, int height, int borderCellsOffset, int mapCellsOffset, FireRedTilesetSpec primaryTileset, FireRedTilesetSpec secondaryTileset, int objectEventCount, int warpCount, int coordEventCount, int backgroundEventCount, int warpArrayOffset)
+            : this(id, name, mapGroup, mapNumber, mapGroupPointerOffset, headerOffset, layoutOffset, eventsOffset, layoutId, width, height, borderCellsOffset, mapCellsOffset, primaryTileset, secondaryTileset, objectEventCount, warpCount, coordEventCount, backgroundEventCount, warpArrayOffset, true)
+        {
+        }
+
+        public FireRedMapSpec(string id, string name, int mapGroup, int mapNumber, int mapGroupPointerOffset, int headerOffset, int layoutOffset, int eventsOffset, int layoutId, int width, int height, int borderCellsOffset, int mapCellsOffset, FireRedTilesetSpec primaryTileset, FireRedTilesetSpec secondaryTileset, int objectEventCount, int warpCount, int coordEventCount, int backgroundEventCount, int warpArrayOffset, bool importObjectEvents)
         {
             Id = id;
             Name = name;
@@ -29,6 +34,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             CoordEventCount = coordEventCount;
             BackgroundEventCount = backgroundEventCount;
             WarpArrayOffset = warpArrayOffset;
+            ImportObjectEvents = importObjectEvents;
         }
 
         public string Id { get; }
@@ -51,6 +57,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public int CoordEventCount { get; }
         public int BackgroundEventCount { get; }
         public int WarpArrayOffset { get; }
+        public bool ImportObjectEvents { get; }
     }
 
     public sealed class FireRedTilesetSpec
@@ -102,5 +109,28 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             new FireRedMapSpec(PlayersHouse2FMapId, "Player's House 2F", PlayersHouse1FMapGroup, PlayersHouse2FMapNumber, IndoorPalletMapGroup, PlayersHouse2FMapHeader, PlayersHouse2FMapLayout, PlayersHouse2FEvents, 2, PlayersHouse2FWidth, PlayersHouse2FHeight, PlayersHouse2FBorderCells, PlayersHouse2FMapCells, BuildingTilesetSpec, GenericBuilding1TilesetSpec, 0, 1, 0, 3, 0x3B97D0),
             new FireRedMapSpec(RivalsHouseMapId, "Rival's House", PlayersHouse1FMapGroup, RivalsHouseMapNumber, IndoorPalletMapGroup, RivalsHouseMapHeader, RivalsHouseMapLayout, RivalsHouseEvents, 3, RivalsHouseWidth, RivalsHouseHeight, RivalsHouseBorderCells, RivalsHouseMapCells, BuildingTilesetSpec, GenericBuilding2TilesetSpec, 2, 3, 0, 3, 0x3B9840)
         });
+
+        public static readonly FireRedMapSpec Route1MapSpec = new FireRedMapSpec(
+            Route1MapId,
+            "Route 1",
+            Route1MapGroup,
+            Route1MapNumber,
+            TownsAndRoutesMapGroup,
+            Route1MapHeader,
+            Route1MapLayout,
+            Route1Events,
+            Route1LayoutId,
+            Route1Width,
+            Route1Height,
+            Route1BorderCells,
+            Route1MapCells,
+            GeneralTilesetSpec,
+            PalletTownTilesetSpec,
+            Route1ObjectEventCount,
+            Route1WarpCount,
+            Route1CoordEventCount,
+            Route1BackgroundEventCount,
+            0,
+            false);
     }
 }

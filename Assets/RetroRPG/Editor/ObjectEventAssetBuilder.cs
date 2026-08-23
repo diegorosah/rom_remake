@@ -50,6 +50,18 @@ namespace RetroRPG.Editor
             public DirectionalSpriteSequence[] Walking { get; }
         }
 
+        internal sealed class MapObjects
+        {
+            public MapObjects(List<NpcController> npcs, List<MonoBehaviour> interactionTargets)
+            {
+                Npcs = npcs;
+                InteractionTargets = interactionTargets;
+            }
+
+            public List<NpcController> Npcs { get; }
+            public List<MonoBehaviour> InteractionTargets { get; }
+        }
+
         private readonly struct FrameKey : IEquatable<FrameKey>
         {
             public FrameKey(int frameIndex, bool horizontalFlip, bool verticalFlip)
@@ -131,7 +143,7 @@ namespace RetroRPG.Editor
             return new Assets(mobile, statics);
         }
 
-        public static List<NpcController> CreateMapObjects(
+        public static MapObjects CreateMapObjects(
             MapDefinition map,
             Transform mapRoot,
             GridCollisionMap collisionMap,
@@ -145,6 +157,7 @@ namespace RetroRPG.Editor
             container.transform.SetParent(mapRoot, false);
 
             var result = new List<NpcController>(map.Npcs.Count);
+            var interactionTargets = new List<MonoBehaviour>(map.Npcs.Count + map.Props.Count);
             for (var npcIndex = 0; npcIndex < map.Npcs.Count; npcIndex++)
             {
                 var definition = map.Npcs[npcIndex];
@@ -168,6 +181,7 @@ namespace RetroRPG.Editor
                 controller.ConfigureMovementBounds(
                     new Vector2Int(definition.MinX, map.Height - 1 - definition.MaxY),
                     new Vector2Int(definition.MaxX, map.Height - 1 - definition.MinY));
+                controller.ConfigureInteraction(definition.InteractionKey);
                 controller.Face(ToGridDirection(definition.InitialDirection));
                 controller.SetVisible(definition.VisibleByDefault);
                 if (definition.MovementPattern == NpcMovementPattern.WanderCardinal)
@@ -181,6 +195,7 @@ namespace RetroRPG.Editor
                     controller.SetMovementPattern(new FixedFacingNpcMovementPattern());
                 }
                 result.Add(controller);
+                interactionTargets.Add(controller);
             }
 
             for (var propIndex = 0; propIndex < map.Props.Count; propIndex++)
@@ -194,9 +209,16 @@ namespace RetroRPG.Editor
                 renderer.enabled = definition.VisibleByDefault;
                 renderer.sortingLayerName = "Default";
                 renderer.sortingOrder = 2;
+                var target = instance.AddComponent<InteractionTarget>();
+                target.Configure(
+                    definition.InteractionKey,
+                    ToRuntimeCell(map, definition.CellX, definition.CellY),
+                    checked((byte)definition.Elevation),
+                    definition.VisibleByDefault);
+                interactionTargets.Add(target);
             }
 
-            return result;
+            return new MapObjects(result, interactionTargets);
         }
 
         private static MobileAsset WriteMobile(OverworldSpriteDefinition definition, ISet<string> owned)

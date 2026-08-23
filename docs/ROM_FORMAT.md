@@ -536,3 +536,65 @@ Primary references are `asm/macros/event.inc`, `include/constants/characters.h`
 and the selected map scripts/text declarations in `pret/pokefirered` at commit
 `c75f352304d529f6ba92d4f74b9cf8b5c3810788`. The offsets above were independently
 checked against the supported FireRed USA rev1 snapshot.
+
+## MVP 6 — Route 1 land encounters (audited rev1)
+
+Route 1 is map group 3, map number 19. The verified pointer chain is
+`gMapGroups` `0x352718` → TownsAndRoutes group `0x352364` → `MapHeader`
+`0x35089C` → layout `0x2E563C` (layout ID 89). The layout is 24×40 (960
+cells), with border `0x2E4EB4`, cells `0x2E4EBC`, primary General tileset
+`0x2D4B04`, secondary PalletTown tileset `0x2D4B1C`, and a 2×2 border.
+Events are at `0x3B66B8` (two objects, no warps or coordinate events, one
+background event); scripts are at `0x167F75` and connections at `0x352A64`.
+
+For this slice, encounter terrain is normalized from bits 24..26 of the
+already-bounds-checked metatile attribute word: 0 is none, 1 is land and 2 is
+water. Route 1 contains exactly 178 land cells and 782 non-encounter cells, with
+no water cells. The verified land-cell runs in top-down map coordinates are:
+
+- y 6..10: x 10..21;
+- y 13..17: x 16..21;
+- y 24..28: x 12..17;
+- y 32..33: x 4..10 and 17..21;
+- y 34: x 2..8 and 15..19;
+- y 35: x 2..8, 12..13 and 15..19;
+- y 36..39: x 12..13.
+
+The exact rev1 wild header is at `0x3CA3F4`. It is 20 bytes: map group and
+number at `+0/+1`, padding at `+2/+3`, then land/water/rock-smash/fishing
+pointers at `+4/+8/+C/+10`. Route 1 has land info `0x3C8F00`, encounter rate
+21, and twelve four-byte land slots at `0x3C8ED0`; the other three method
+pointers are null.
+
+| Slot | Weight | Level | Species ID |
+|---:|---:|---:|---|
+| 0 | 20 | 3 | Pidgey (16) |
+| 1 | 20 | 3 | Rattata (19) |
+| 2 | 10 | 3 | Pidgey (16) |
+| 3 | 10 | 3 | Rattata (19) |
+| 4 | 10 | 2 | Pidgey (16) |
+| 5 | 10 | 2 | Rattata (19) |
+| 6 | 5 | 3 | Pidgey (16) |
+| 7 | 5 | 3 | Rattata (19) |
+| 8 | 4 | 4 | Pidgey (16) |
+| 9 | 4 | 4 | Rattata (19) |
+| 10 | 1 | 5 | Pidgey (16) |
+| 11 | 1 | 4 | Rattata (19) |
+
+Weights total 100; aggregated species weight is 50/50. Each native slot stores
+minimum level, maximum level and a little-endian species ID; these selected slots
+have equal minimum/maximum levels. Runtime encounter rolls use an injected random
+source. The native base check is rate×16 against a 1600-value range (21% here,
+before modifiers), and native behavior changes can add a 60% gate. These are
+declarative rules for the runtime and are never executed by the parser.
+
+Bounds rules: exact fingerprint first; validate the group/header/layout chain,
+24×40 cell product, all map and event ranges, both tileset identities, every
+referenced metatile attribute before classifying terrain, exact wild header map
+identity, null unsupported-method pointers, rate, complete twelve-slot array,
+known species IDs and weights totaling 100. This milestone parses only the
+whitelisted Route 1 header and does not scan arbitrary wild headers.
+
+Primary references are `include/wild_encounter.h`, the Route 1 map/layout data,
+`src/wild_encounter.c`, and the generated wild encounter declarations in
+`pret/pokefirered` at commit `c75f352304d529f6ba92d4f74b9cf8b5c3810788`.

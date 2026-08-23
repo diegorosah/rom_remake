@@ -19,10 +19,12 @@ namespace RetroRPG.Runtime
         private float accumulatedSeconds;
         private int currentTick;
         private bool isPrimaryDriver;
+        private bool isSuspended;
 
         public MapRuntimeRoot MapRoot => mapRoot;
         public int CurrentTick => currentTick;
         public bool IsPrimaryDriver => isPrimaryDriver;
+        public bool IsSuspended => isSuspended;
 
         public void Configure(MapRuntimeRoot configuredMapRoot)
         {
@@ -44,10 +46,19 @@ namespace RetroRPG.Runtime
             }
         }
 
+        public void SetSuspended(bool suspended)
+        {
+            isSuspended = suspended;
+            if (suspended)
+            {
+                accumulatedSeconds = 0f;
+            }
+        }
+
         /// <summary>Advances the fixed clock by supplied elapsed time without relying on Unity frame timing.</summary>
         public void Advance(float deltaSeconds)
         {
-            if (deltaSeconds <= 0f || !isPrimaryDriver || mapRoot == null || !mapRoot.IsRuntimeActive)
+            if (deltaSeconds <= 0f || !isPrimaryDriver || isSuspended || mapRoot == null || !mapRoot.IsRuntimeActive)
             {
                 if (mapRoot == null || !mapRoot.IsRuntimeActive)
                 {
@@ -80,7 +91,7 @@ namespace RetroRPG.Runtime
 
         public void TickOnce()
         {
-            if (!isPrimaryDriver || mapRoot == null || !mapRoot.IsRuntimeActive)
+            if (!isPrimaryDriver || isSuspended || mapRoot == null || !mapRoot.IsRuntimeActive)
             {
                 return;
             }

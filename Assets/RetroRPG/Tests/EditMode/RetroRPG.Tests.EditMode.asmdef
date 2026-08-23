@@ -8,7 +8,9 @@
     "RetroRPG.Importers.GBA.PokemonFireRed",
     "RetroRPG.Unity",
     "RetroRPG.Editor",
-    "RetroRPG.Runtime"
+    "RetroRPG.Runtime",
+    "RetroRPG.Renderers.Classic2D",
+    "UnityEngine.UI"
   ],
   "includePlatforms": ["Editor"],
   "excludePlatforms": [],
