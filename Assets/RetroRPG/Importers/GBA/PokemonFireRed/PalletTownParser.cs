@@ -8,15 +8,17 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
 {
     public sealed class PalletTownParseResult
     {
-        public PalletTownParseResult(MapDefinition map, ImportReport report)
+        public PalletTownParseResult(MapDefinition map, OverworldSpriteDefinition playerSprite, ImportReport report)
         {
             Map = map;
+            PlayerSprite = playerSprite;
             Report = report ?? throw new ArgumentNullException(nameof(report));
         }
 
         public MapDefinition Map { get; }
+        public OverworldSpriteDefinition PlayerSprite { get; }
         public ImportReport Report { get; }
-        public bool Succeeded => Map != null && !Report.HasErrors;
+        public bool Succeeded => Map != null && PlayerSprite != null && !Report.HasErrors;
     }
 
     public sealed class PalletTownParser
@@ -35,7 +37,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                 if (!detection.CanImport)
                 {
                     report.Add(new ParseDiagnostic("Game", DiagnosticSeverity.Error, detection.Message));
-                    return new PalletTownParseResult(null, report);
+                    return new PalletTownParseResult(null, null, report);
                 }
 
                 return ParseSupportedReader(rom.CreateReader(), report);
@@ -53,7 +55,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                 report.Add(new ParseDiagnostic("Safety", DiagnosticSeverity.Error, exception.Message));
             }
 
-            return new PalletTownParseResult(null, report);
+            return new PalletTownParseResult(null, null, report);
         }
 
         private static PalletTownParseResult ParseSupportedReader(RomReader reader, ImportReport report)
@@ -104,8 +106,10 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                     cells,
                     primary,
                     secondary);
+                var playerSprite = PlayerRedNormalParser.Parse(reader);
                 report.Add(new ParseDiagnostic("Map", DiagnosticSeverity.Info, "Parsed Pallet Town (24x20, 480 cells).", FireRedRomLayoutRev1.PalletTownMapLayout, FireRedRomLayoutRev1.MapLayoutSize));
-                return new PalletTownParseResult(map, report);
+                report.Add(new ParseDiagnostic("PlayerSprite", DiagnosticSeverity.Info, "Parsed the normal on-foot player sprite (9 frames, 8 animations).", FireRedRomLayoutRev1.PlayerRedNormalGraphicsInfo, FireRedRomLayoutRev1.ObjectEventGraphicsInfoSize));
+                return new PalletTownParseResult(map, playerSprite, report);
             }
             catch (RomReadException exception)
             {
@@ -120,7 +124,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                 report.Add(new ParseDiagnostic("Safety", DiagnosticSeverity.Error, exception.Message));
             }
 
-            return new PalletTownParseResult(null, report);
+            return new PalletTownParseResult(null, null, report);
         }
 
         private static void ValidateMapPointers(RomReader reader)

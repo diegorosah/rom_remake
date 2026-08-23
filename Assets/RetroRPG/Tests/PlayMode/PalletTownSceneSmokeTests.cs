@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using RetroRPG.Unity;
+using RetroRPG.Runtime;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -72,6 +73,71 @@ namespace RetroRPG.Tests.PlayMode
             Assert.That(byName.ContainsKey("Middle"), Is.True);
             Assert.That(byName.ContainsKey("Top"), Is.True);
             Assert.That(Camera.main, Is.Not.Null);
+
+            var collision = Object.FindAnyObjectByType<GridCollisionMap>();
+            var player = Object.FindAnyObjectByType<PlayerController>();
+            var animator = Object.FindAnyObjectByType<DirectionalSpriteAnimator>();
+            var follow = Object.FindAnyObjectByType<PixelPerfectCameraFollow>();
+            Assert.That(collision, Is.Not.Null);
+            Assert.That(player, Is.Not.Null);
+            Assert.That(animator, Is.Not.Null);
+            Assert.That(player.SpriteAnimator, Is.SameAs(animator));
+            Assert.That(follow, Is.Not.Null);
+            player.InputEnabled = false;
+            Assert.That(player.CurrentCell, Is.EqualTo(new Vector2Int(6, 6)));
+            Assert.That(player.Elevation, Is.EqualTo(3));
+            Assert.That(collision.GetCollision(player.CurrentCell), Is.Zero);
+            Assert.That(collision.GetElevation(player.CurrentCell), Is.EqualTo(3));
+            var spawnPosition = player.transform.position;
+            var moved = false;
+            foreach (var direction in new[] { GridDirection.Right, GridDirection.Left, GridDirection.Up, GridDirection.Down })
+            {
+                if (!collision.CanMove(player.CurrentCell, player.Elevation, direction, out _, out _)) continue;
+                Assert.That(player.TryMove(direction), Is.True);
+                Assert.That(animator.IsWalking, Is.True);
+                Assert.That(animator.Facing, Is.EqualTo(direction));
+                player.Advance(1f / player.CellsPerSecond);
+                Assert.That(player.IsMoving, Is.False);
+                Assert.That(animator.IsWalking, Is.False);
+                Assert.That(player.transform.position, Is.Not.EqualTo(spawnPosition));
+                moved = true;
+                break;
+            }
+            Assert.That(moved, Is.True, "The verified spawn must have an open cardinal neighbor.");
+            Assert.That(animator.CurrentSprite, Is.Not.Null);
+
+            var blockedProbeFound = false;
+            var cardinalDirections = new[] { GridDirection.Right, GridDirection.Left, GridDirection.Up, GridDirection.Down };
+            for (var y = 0; y < collision.Height && !blockedProbeFound; y++)
+            {
+                for (var x = 0; x < collision.Width && !blockedProbeFound; x++)
+                {
+                    var probeCell = new Vector2Int(x, y);
+                    if (collision.GetCollision(probeCell) != 0) continue;
+                    for (var directionIndex = 0; directionIndex < cardinalDirections.Length; directionIndex++)
+                    {
+                        var direction = cardinalDirections[directionIndex];
+                        var blockedCell = probeCell + GridDirections.ToOffset(direction);
+                        if (!collision.IsInBounds(blockedCell) || collision.GetCollision(blockedCell) == 0) continue;
+
+                        var probeElevation = collision.GetElevation(probeCell);
+                        if (probeElevation == 0 || probeElevation == 15) probeElevation = 3;
+                        player.Configure(collision, probeCell, probeElevation, player.CellsPerSecond);
+                        var blockedStartPosition = player.transform.position;
+                        Assert.That(player.TryMove(direction), Is.False);
+                        Assert.That(player.IsMoving, Is.False);
+                        Assert.That(player.CurrentCell, Is.EqualTo(probeCell));
+                        Assert.That(player.transform.position, Is.EqualTo(blockedStartPosition));
+                        blockedProbeFound = true;
+                        break;
+                    }
+                }
+            }
+            Assert.That(blockedProbeFound, Is.True, "The generated map must expose a passable cell adjacent to ROM collision data.");
+
+            var cameraPosition = Camera.main.transform.position;
+            Assert.That(cameraPosition.x * 16f, Is.EqualTo(Mathf.Round(cameraPosition.x * 16f)).Within(0.001f));
+            Assert.That(cameraPosition.y * 16f, Is.EqualTo(Mathf.Round(cameraPosition.y * 16f)).Within(0.001f));
 
             Tilemap animatedMap = null;
             Vector3Int animatedPosition = default;

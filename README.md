@@ -2,7 +2,9 @@
 
 Unity 6 tooling that reads a user-owned retro RPG ROM into a game-agnostic intermediate
 representation and generates local Unity assets. The first supported target is Pokemon
-FireRed USA revision 1, beginning with Pallet Town.
+FireRed USA revision 1, beginning with Pallet Town. The current vertical slice includes
+a controllable player walking on the imported grid, directional idle/walking animation,
+collision blocking, and a pixel-perfect follow camera.
 
 ## Requirements
 
@@ -21,6 +23,16 @@ FireRed USA revision 1, beginning with Pallet Town.
 The importer stores its last selected path only in Unity `EditorPrefs`. Generated content
 is written beneath `Assets/Imported`, which is ignored by Git.
 
+## Play the current slice
+
+1. In **Tools > Retro RPG > ROM Inspector**, select the supported ROM and click
+   **Import Pallet Town**.
+2. Click **Open Pallet Town Scene** in the Inspector.
+3. Press Play and move Red with WASD or the arrow keys.
+
+The current slice supports grid movement, idle/walking animation, ROM-derived
+collision and camera follow. Doors do not transition yet; that begins in MVP 3.
+
 ## Tests
 
 Run EditMode tests in the Unity Test Runner or in batch mode:
@@ -34,9 +46,10 @@ Run EditMode tests in the Unity Test Runner or in batch mode:
 The `-runTests` invocation deliberately omits `-quit`; the Test Framework owns the
 batch-run lifecycle. A compile-only check may use `-quit` without `-runTests`.
 
-Verified gates are 37 EditMode tests (35 passed, 2 explicit skipped), one explicit ROM
+Verified gates are 48 EditMode tests (46 passed, 2 explicit skipped), one explicit ROM
 parse, one explicit deterministic double-import check, and one explicit PlayMode scene
-smoke test. Explicit tests require `RETRO_RPG_TEST_ROM` to point to the locally owned
+smoke test (`mvp2-playmode-4`) covering movement, collision, animation, and camera.
+Explicit tests require `RETRO_RPG_TEST_ROM` to point to the locally owned
 ROM. Generated output is under `Assets/Imported/FireRed/rev1/PalletTown/`; ROMs,
 generated assets, Unity caches, and test results remain ignored by Git.
 

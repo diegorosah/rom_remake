@@ -214,6 +214,7 @@ namespace RetroRPG.IR
         public int MetatileId { get; }
         public int Collision { get; }
         public int Elevation { get; }
+        public bool IsBlocked => Collision != 0;
     }
 
     [Serializable]

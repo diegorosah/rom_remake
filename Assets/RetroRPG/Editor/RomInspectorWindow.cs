@@ -218,7 +218,7 @@ namespace RetroRPG.Editor
                     return;
                 }
 
-                PalletTownAssetBuilder.Import(parsed.Map, parsed.Report, ShowImportProgress);
+                PalletTownAssetBuilder.Import(parsed.Map, parsed.PlayerSprite, parsed.Report, ShowImportProgress);
                 EditorUtility.DisplayDialog("Pallet Town importer", "Pallet Town assets and scene were generated successfully.", "OK");
             }
             catch (OperationCanceledException exception)

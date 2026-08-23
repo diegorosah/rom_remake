@@ -183,11 +183,118 @@ Metatiles are 16x16 pixels and occupy one world unit. Subtiles use PPU 16 and Un
 cells of 0.5 x 0.5. Map row order is top-to-bottom; Unity cell Y is inverted
 deterministically. Palette and flips are applied before sprite creation.
 
+## Player overworld sprite: Red on foot
+
+The MVP 2 player facts were cross-checked against the supported rev1 snapshot and
+`pret/pokefirered` commit `c75f352304d529f6ba92d4f74b9cf8b5c3810788`. They
+apply only after the exact header and fingerprint gate described above succeeds.
+
+### Verified pointer chain
+
+| Structure | File offset/range | Verified contract |
+|---|---:|---|
+| graphics-info pointer entry 0 | `0x39FE20..0x39FE24` | points to `0x3A3C20` |
+| Red normal graphics info | `0x3A3C20..0x3A3C44` | one `0x24`-byte record |
+| image table | `0x3A0110..0x3A0158` | first nine `SpriteFrameImage` entries, 8 bytes each |
+| animation pointer table | `0x3A34E0..0x3A3500` | idle/walk for four directions |
+| player palette entry | `0x3A5208..0x3A5210` | tag `0x1100`, points to `0x35B9D8` |
+| palette data | `0x35B9D8..0x35B9F8` | 16 raw BGR555 colours |
+| normal graphics | `0x35BBD8..0x35C4D8` | nine raw 4bpp frames |
+
+The graphics-info record must contain tile tag `0xFFFF`, palette tag `0x1100`,
+reflection tag `0x1102`, allocation size `0x0200`, width 16, height 32 and foot
+tracks. Its pointer fields must match the verified OAM (`0x083A3780`), subsprite
+(`0x083A380C`), animation (`0x083A34E0`), image (`0x083A0110`) and affine-animation
+(`0x08231D6C`) tables. These callbacks and scripts are validated as identifiers and
+data; they are never executed.
+
+All pointers are canonical little-endian GBA ROM pointers. The parser validates the
+complete table or structure range before reading fields and uses checked arithmetic
+for every count, stride and offset calculation.
+
+### Frame format
+
+- Each indexed frame is 16x32 pixels, arranged as 2x4 sequential 8x8 tiles.
+- A frame is 256 bytes; all nine frames occupy exactly `0x900` raw bytes.
+- Frame `n` begins at `0x35BBD8 + n * 0x100` for `n` in `0..8`.
+- Every image-table entry must point to its corresponding frame and declare size
+  `0x100`.
+- The data is uncompressed 4bpp. Low/high nibble and BGR555 conversion follow the
+  already-audited tile and palette rules; palette index zero becomes transparent.
+- Any non-canonical pointer, unexpected size, non-contiguous frame or out-of-range
+  index blocks import. These data must not be passed through LZ10.
+
+### Declarative direction animations
+
+| Direction | Idle | Walking sequence |
+|---|---|---|
+| south | frame `0`, 16 ticks | `3, 0, 4, 0`, 8 ticks each |
+| north | frame `1`, 16 ticks | `5, 1, 6, 1`, 8 ticks each |
+| west | frame `2`, 16 ticks | `7, 2, 8, 2`, 8 ticks each |
+| east | frame `2`, H-flipped, 16 ticks | `7, 2, 8, 2`, all H-flipped, 8 ticks each |
+
+The eight animation pointer slots at `0x3A34E0..0x3A3500` point respectively to
+idle south/north/west/east at `0x3A2B34`, `0x3A2B3C`, `0x3A2B44`, `0x3A2B4C`, then
+walking south/north/west/east at `0x3A2B54`, `0x3A2B68`, `0x3A2B7C`, `0x3A2B90`.
+Idle scripts occupy 8 bytes and walking scripts 20 bytes. The parser accepts only
+the exact audited frame commands followed by a jump to zero, positive durations,
+frame indices `0..8`, and the declared flip flags. The IR retains frame indices,
+flips and ticks, never ROM control flow.
+
+The generic IR mapping is an `OverworldSpriteDefinition` named
+`player_red_normal`, with a 16-colour RGBA palette, nine immutable indexed frames
+and idle/walking animations for the four cardinal directions. Unity types and
+FireRed offsets do not enter this contract or the Runtime assembly.
+
+## Pallet Town movement collision
+
+For the supported map, the 480 cells have the following verified distribution:
+
+| Property | Count |
+|---|---:|
+| collision `0` | 282 |
+| collision `1` | 198 |
+| elevation `0` | 198 |
+| elevation `1` | 12 |
+| elevation `3` | 270 |
+| normal behavior `0x00` | 460 |
+| ocean-water behavior `0x15` | 12 |
+| warp-door behavior `0x69` | 3 |
+| signpost behavior `0x84` | 5 |
+| directional behavior `0x30..0x37` | 0 |
+
+The exact combinations are 270 passable/elevation-3 normal cells, 12
+passable/elevation-1 water cells, 190 collision-1 normal cells, three collision-1
+warp doors and five collision-1 signposts.
+
+For a terrestrial player, a cardinal step is blocked when the destination is out
+of bounds, destination collision is nonzero, a directional edge forbids the step,
+or elevation is incompatible. Elevation mismatch follows the verified engine rule:
+
+- current elevation zero accepts any target;
+- target elevation zero or 15 accepts the current elevation;
+- otherwise target and current elevation must match.
+
+When directional behaviors are present, a south step checks south on the current
+cell and north on the target; north checks north/south, west checks west/east, and
+east checks east/west. Pallet Town references none of those behaviors, but the rule
+is retained in the normalized collision contract. With preview spawn on elevation
+3, all 198 collision-1 cells and all 12 elevation-1 water cells are unreachable.
+Object occupancy belongs to the NPC milestone and is not part of MVP 2.
+
+The standalone preview spawn is a product/runtime choice. MVP 2 uses a validated
+passable elevation-3 cell; canonical warp-based placement belongs to MVP 3.
+
 ## Primary references
 
 - `include/global.fieldmap.h` in `pret/pokefirered` for field-map structures and masks.
 - `data/layouts/layouts.json` for named map layouts and Pallet Town dimensions/tilesets.
 - `src/tileset_anims.c` and related data tables for animation callback semantics.
+- `include/sprite.h`, `include/constants/event_objects.h` and
+  `src/data/object_events/object_event_graphics*.h` for player graphics structures.
+- `src/event_object_movement.c`, `src/fieldmap.c` and `src/metatile_behavior.c` for
+  collision, elevation and directional-edge semantics.
+- `spritesheet_rules.mk` for the 2x4-tile player-frame layout.
 - GBA/Nintendo compression and graphics conventions as represented by the decomp's
   LZ77 and tile data contracts.
 

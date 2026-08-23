@@ -22,6 +22,7 @@ Assets/Imported/FireRed/rev1/PalletTown/
   ImportReport.json
   ImportManifest.json
   PalletTown.unity
+  Player/*.png
   Textures/*.png
   Tiles/*.asset
 ```
@@ -29,7 +30,11 @@ Assets/Imported/FireRed/rev1/PalletTown/
 Textures are point-filtered, uncompressed and mip-free. Stable names include tile,
 palette and both flip bits; animated variants include a stable frame suffix. The scene
 uses a Grid with 0.5 x 0.5 cells, PPU 16, an orthographic Pixel Perfect camera at
-240x160, deterministic inverted Y, and sorting orders Bottom=0, Middle=1, Top=2.
+240x160, deterministic inverted Y, and sorting orders Bottom=0, Middle=1, Player=2,
+Top=3. The Player folder contains stable point-filtered, uncompressed, mip-free 16x32
+sprites generated from the player-sprite IR. The scene contains a bottom-up
+`GridCollisionMap`, a grid-stepped `PlayerController` (4 cells/second by default), a
+directional idle/walking animator, and a pixel-quantized camera follow component.
 
 `ImportManifest.json` (schema 1) owns the sorted list of generated paths. On reimport,
 only stale paths previously listed by that manifest and still under the output root are
@@ -50,7 +55,8 @@ $env:RETRO_RPG_TEST_ROM='D:\rom_remake\POKEMON_FIRERED_ROM\Pokemon_FireRed.gba'
 & 'C:\Program Files\Unity\Hub\Editor\6000.5.9f1\Editor\Unity.exe' -batchmode -nographics -projectPath 'D:\rom_remake' -runTests -testPlatform PlayMode -testResults 'D:\rom_remake\TestResults\playmode-smoke.xml'
 ```
 
-Recorded gates: compile exit 0; EditMode 37 total with 35 passed, 2 explicit skipped,
+Recorded gates: compile exit 0; EditMode 48 total with 46 passed, 2 explicit skipped,
 0 failed; explicit parser 1/1; explicit double generation 1/1 with equal content
-hashes and GUIDs; and PlayMode smoke 1/1. Test XML is outside tracked output and is
+hashes and GUIDs; and PlayMode smoke `mvp2-playmode-4` 1/1, including movement and
+collision checks. Test XML is outside tracked output and is
 ignored by Git.

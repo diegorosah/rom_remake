@@ -1436,18 +1436,18 @@ Permitir caminhar por Pallet Town.
 
 ### Tarefas
 
-- [ ] Criar `PlayerController`.
-- [ ] Implementar movimento em grid.
-- [ ] Configurar velocidade parametrizável.
-- [ ] Criar suporte a direção.
-- [ ] Criar animação idle.
-- [ ] Criar animação walking.
-- [ ] Extrair/importar sprite necessário do personagem, quando suportado.
-- [ ] Criar camada de colisão.
-- [ ] Gerar colisões a partir dos dados disponíveis.
-- [ ] Impedir movimento para células bloqueadas.
-- [ ] Adicionar câmera seguindo jogador.
-- [ ] Garantir pixel-perfect no renderer clássico.
+- [x] Criar `PlayerController`.
+- [x] Implementar movimento em grid.
+- [x] Configurar velocidade parametrizável.
+- [x] Criar suporte a direção.
+- [x] Criar animação idle.
+- [x] Criar animação walking.
+- [x] Extrair/importar sprite necessário do personagem, quando suportado.
+- [x] Criar camada de colisão.
+- [x] Gerar colisões a partir dos dados disponíveis.
+- [x] Impedir movimento para células bloqueadas.
+- [x] Adicionar câmera seguindo jogador.
+- [x] Garantir pixel-perfect no renderer clássico.
 
 ### Critério de aceite
 

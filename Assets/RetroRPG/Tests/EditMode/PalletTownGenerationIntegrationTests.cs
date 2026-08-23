@@ -6,7 +6,11 @@ using NUnit.Framework;
 using RetroRPG.Editor;
 using RetroRPG.Importers.GBA.Common;
 using RetroRPG.Importers.GBA.PokemonFireRed;
+using RetroRPG.Runtime;
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace RetroRPG.Tests.EditMode
 {
@@ -21,12 +25,15 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(romPath, Is.Not.Null.And.Not.Empty, TestRomEnvironmentVariable + " must point to a local ROM.");
 
             var firstResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(firstResult.Map, firstResult.Report, null);
+            PalletTownAssetBuilder.Import(firstResult.Map, firstResult.PlayerSprite, firstResult.Report, null);
             var first = CaptureGeneratedAssets();
             Assert.That(first.Count, Is.GreaterThan(3));
+            Assert.That(ContainsPath(first, "/Player/"), Is.True);
+            Assert.That(ContainsPath(first, ".unity"), Is.True);
+            AssertGeneratedSceneComponents();
 
             var secondResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(secondResult.Map, secondResult.Report, null);
+            PalletTownAssetBuilder.Import(secondResult.Map, secondResult.PlayerSprite, secondResult.Report, null);
             var second = CaptureGeneratedAssets();
 
             CollectionAssert.AreEquivalent(first.Keys, second.Keys);
@@ -35,6 +42,44 @@ namespace RetroRPG.Tests.EditMode
                 Assert.That(second[path].Guid, Is.EqualTo(first[path].Guid), "GUID changed for " + path);
                 Assert.That(second[path].ContentHash, Is.EqualTo(first[path].ContentHash), "content changed for " + path);
             }
+        }
+
+        private static bool ContainsPath(Dictionary<string, GeneratedAssetSnapshot> assets, string fragment)
+        {
+            foreach (var path in assets.Keys)
+            {
+                if (path.IndexOf(fragment, StringComparison.Ordinal) >= 0) return true;
+            }
+            return false;
+        }
+
+        private static void AssertGeneratedSceneComponents()
+        {
+            const string scenePath = PalletTownAssetBuilder.OutputRoot + "/PalletTown.unity";
+            var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+            var root = scene.GetRootGameObjects();
+            GameObject palletTown = null;
+            GameObject camera = null;
+            for (var i = 0; i < root.Length; i++)
+            {
+                if (root[i].name == "Pallet Town") palletTown = root[i];
+                if (root[i].name == "Main Camera") camera = root[i];
+            }
+
+            Assert.That(palletTown, Is.Not.Null);
+            Assert.That(palletTown.transform.Find("Bottom").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
+            Assert.That(palletTown.transform.Find("Middle").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
+            Assert.That(palletTown.transform.Find("Top").GetComponent<UnityEngine.Tilemaps.Tilemap>(), Is.Not.Null);
+            var collision = palletTown.transform.Find("Collision");
+            var player = palletTown.transform.Find("Player");
+            Assert.That(collision, Is.Not.Null);
+            Assert.That(collision.GetComponent<GridCollisionMap>(), Is.Not.Null);
+            Assert.That(player, Is.Not.Null);
+            Assert.That(player.GetComponent<PlayerController>(), Is.Not.Null);
+            Assert.That(player.GetComponent<DirectionalSpriteAnimator>(), Is.Not.Null);
+            Assert.That(camera, Is.Not.Null);
+            Assert.That(camera.GetComponent<PixelPerfectCameraFollow>(), Is.Not.Null);
+            Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(scenePath));
         }
 
         private static PalletTownParseResult ParseSupportedRom(string romPath)

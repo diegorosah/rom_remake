@@ -6,6 +6,7 @@
     "RetroRPG.IR",
     "RetroRPG.Importers.GBA.Common",
     "RetroRPG.Importers.GBA.PokemonFireRed",
+    "RetroRPG.Runtime",
     "RetroRPG.Unity",
     "Unity.RenderPipelines.Universal.2D.Runtime"
   ],

@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using RetroRPG.Core;
 using RetroRPG.IR;
+using RetroRPG.Runtime;
 using RetroRPG.Unity;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -25,6 +26,7 @@ namespace RetroRPG.Editor
         private const string ScenePath = OutputRoot + "/PalletTown.unity";
         private const float CellsPerWorldUnit = 2f;
         private const float PixelTicksPerSecond = 60f;
+        private static readonly Vector2Int PlayerSpawnCell = new Vector2Int(6, 6);
 
         [Serializable]
         private sealed class ImportManifest
@@ -77,6 +79,45 @@ namespace RetroRPG.Editor
             }
         }
 
+        private readonly struct PlayerFrameKey : IEquatable<PlayerFrameKey>
+        {
+            public PlayerFrameKey(int frameIndex, bool horizontalFlip, bool verticalFlip)
+            {
+                FrameIndex = frameIndex;
+                HorizontalFlip = horizontalFlip;
+                VerticalFlip = verticalFlip;
+            }
+
+            public int FrameIndex { get; }
+            public bool HorizontalFlip { get; }
+            public bool VerticalFlip { get; }
+
+            public string StableName => string.Format(
+                CultureInfo.InvariantCulture,
+                "player_frame_{0:D2}_h{1}_v{2}",
+                FrameIndex,
+                HorizontalFlip ? 1 : 0,
+                VerticalFlip ? 1 : 0);
+
+            public bool Equals(PlayerFrameKey other)
+            {
+                return FrameIndex == other.FrameIndex
+                    && HorizontalFlip == other.HorizontalFlip
+                    && VerticalFlip == other.VerticalFlip;
+            }
+
+            public override bool Equals(object obj) => obj is PlayerFrameKey other && Equals(other);
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hash = FrameIndex;
+                    hash = (hash * 397) ^ (HorizontalFlip ? 1 : 0);
+                    return (hash * 397) ^ (VerticalFlip ? 1 : 0);
+                }
+            }
+        }
+
         public static void Validate(MapDefinition map)
         {
             if (map == null) throw new ArgumentNullException(nameof(map));
@@ -110,6 +151,99 @@ namespace RetroRPG.Editor
                         throw new InvalidOperationException("Metatile " + metatile.Index + " references an unavailable palette.");
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Validates the complete input snapshot used by the MVP2 importer. This
+        /// happens before the output folder or any asset is touched.
+        /// </summary>
+        public static void Validate(MapDefinition map, OverworldSpriteDefinition playerSprite)
+        {
+            Validate(map);
+            ValidatePlayerSprite(playerSprite);
+            ValidatePlayerSpawn(map);
+        }
+
+        private static void ValidatePlayerSprite(OverworldSpriteDefinition playerSprite)
+        {
+            if (playerSprite == null)
+            {
+                throw new ArgumentNullException(nameof(playerSprite));
+            }
+
+            if (string.IsNullOrWhiteSpace(playerSprite.Id) || playerSprite.Palette == null ||
+                playerSprite.Palette.Count != OverworldSpriteDefinition.PaletteColorCount ||
+                playerSprite.Frames == null || playerSprite.Frames.Count == 0 ||
+                playerSprite.Animations == null || playerSprite.Animations.Count != OverworldSpriteDefinition.RequiredAnimationCount)
+            {
+                throw new InvalidOperationException("Player sprite IR is incomplete.");
+            }
+
+            var frameIds = new HashSet<int>();
+            for (var frameIndex = 0; frameIndex < playerSprite.Frames.Count; frameIndex++)
+            {
+                var frame = playerSprite.Frames[frameIndex];
+                if (frame == null || frame.Width != playerSprite.Width || frame.Height != playerSprite.Height ||
+                    frame.Pixels == null || frame.Pixels.Count != checked(frame.Width * frame.Height) || !frameIds.Add(frame.Index))
+                {
+                    throw new InvalidOperationException("Player sprite frames are incomplete or inconsistent.");
+                }
+            }
+
+            var animationKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (var animationIndex = 0; animationIndex < playerSprite.Animations.Count; animationIndex++)
+            {
+                var animation = playerSprite.Animations[animationIndex];
+                if (animation == null || animation.Steps == null || animation.Steps.Count == 0)
+                {
+                    throw new InvalidOperationException("Player sprite animation is incomplete.");
+                }
+
+                var key = ((int)animation.Direction).ToString(CultureInfo.InvariantCulture)
+                    + ":" + ((int)animation.State).ToString(CultureInfo.InvariantCulture);
+                if (!animationKeys.Add(key))
+                {
+                    throw new InvalidOperationException("Player sprite has duplicate directional animations.");
+                }
+
+                var duration = animation.Steps[0].DurationTicks;
+                for (var stepIndex = 0; stepIndex < animation.Steps.Count; stepIndex++)
+                {
+                    var step = animation.Steps[stepIndex];
+                    if (!frameIds.Contains(step.FrameIndex) || step.DurationTicks <= 0 || step.DurationTicks != duration)
+                    {
+                        throw new InvalidOperationException("Player sprite animation has an invalid frame or nonuniform duration.");
+                    }
+                }
+            }
+
+            for (var directionValue = (int)SpriteDirection.South; directionValue <= (int)SpriteDirection.East; directionValue++)
+            {
+                var direction = (SpriteDirection)directionValue;
+                for (var stateValue = (int)SpriteAnimationState.Idle; stateValue <= (int)SpriteAnimationState.Walking; stateValue++)
+                {
+                    var state = (SpriteAnimationState)stateValue;
+                    var key = ((int)direction).ToString(CultureInfo.InvariantCulture)
+                        + ":" + ((int)state).ToString(CultureInfo.InvariantCulture);
+                    if (!animationKeys.Contains(key))
+                    {
+                        throw new InvalidOperationException("Player sprite is missing a required directional animation.");
+                    }
+                }
+            }
+        }
+
+        private static void ValidatePlayerSpawn(MapDefinition map)
+        {
+            // The source map is top-down, while the runtime collision map is bottom-up.
+            const int sourceSpawnX = 6;
+            const int sourceSpawnY = 13;
+            var sourceIndex = (sourceSpawnY * map.Width) + sourceSpawnX;
+            var sourceCell = map.Cells[sourceIndex];
+            if (sourceCell.Collision != 0 || sourceCell.Elevation != 3 || PlayerSpawnCell.y != map.Height - 1 - sourceSpawnY)
+            {
+                throw new InvalidOperationException("The verified Pallet Town player spawn must be walkable at elevation 3.");
             }
         }
 
@@ -172,31 +306,39 @@ namespace RetroRPG.Editor
         }
 
         /// <summary>Imports only after the parser has emitted and this builder has validated a complete IR snapshot.</summary>
-        public static void Import(MapDefinition map, ImportReport report, Func<string, float, bool> shouldCancel)
+        public static void Import(
+            MapDefinition map,
+            OverworldSpriteDefinition playerSprite,
+            ImportReport report,
+            Func<string, float, bool> shouldCancel)
         {
             if (report == null) throw new ArgumentNullException(nameof(report));
             if (report.HasErrors) throw new InvalidOperationException("An import report with errors cannot generate assets.");
             ThrowIfCancelled(shouldCancel, "Validating IR", 0.05f);
-            Validate(map);
+            Validate(map, playerSprite);
 
             // All object discovery and JSON construction completes before generated assets are touched.
-            var context = new BuildContext(map);
+            var context = new BuildContext(map, playerSprite);
             context.Prepare(shouldCancel);
+            var irJson = DeterministicJson.SerializeMap(map, playerSprite);
+            var reportJson = DeterministicJson.SerializeReport(report);
             ThrowIfCancelled(shouldCancel, "Preparing deterministic output", 0.32f);
 
             Directory.CreateDirectory(ToAbsolutePath(OutputRoot));
             Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Textures"));
             Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Tiles"));
+            Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Player"));
             var priorManifest = LoadManifest();
             var owned = new SortedSet<string>(StringComparer.Ordinal);
             try
             {
-                WriteText(IrPath, DeterministicJson.SerializeMap(map));
-                WriteText(ReportPath, DeterministicJson.SerializeReport(report));
+                WriteText(IrPath, irJson);
+                WriteText(ReportPath, reportJson);
                 owned.Add(IrPath);
                 owned.Add(ReportPath);
 
                 context.WriteTexturesAndTiles(owned, shouldCancel);
+                context.WritePlayerSprites(owned);
                 CreateScene(context, owned);
                 owned.Add(ManifestPath);
                 WriteText(ManifestPath, JsonUtility.ToJson(new ImportManifest { ownedAssets = ToArray(owned) }, true) + "\n");
@@ -208,6 +350,11 @@ namespace RetroRPG.Editor
             {
                 EditorUtility.ClearProgressBar();
             }
+        }
+
+        public static void Import(MapDefinition map, ImportReport report, Func<string, float, bool> shouldCancel)
+        {
+            throw new InvalidOperationException("MVP2 import requires a complete player sprite IR snapshot.");
         }
 
         public static string GetOutputFolderAbsolutePath() => ToAbsolutePath(OutputRoot);
@@ -225,6 +372,13 @@ namespace RetroRPG.Editor
         {
             Validate(map);
             return DeterministicJson.SerializeMap(map);
+        }
+
+        /// <summary>Produces the complete stable map and player IR diagnostics used by MVP2 output.</summary>
+        public static string SerializeMapJson(MapDefinition map, OverworldSpriteDefinition playerSprite)
+        {
+            Validate(map, playerSprite);
+            return DeterministicJson.SerializeMap(map, playerSprite);
         }
 
         /// <summary>Produces the exact stable JSON representation used by the generated report file.</summary>
@@ -249,7 +403,7 @@ namespace RetroRPG.Editor
                 root = FindRootObject(scene, "Pallet Town");
                 bottom = GetExistingTilemap(root.transform, "Bottom", 0);
                 middle = GetExistingTilemap(root.transform, "Middle", 1);
-                top = GetExistingTilemap(root.transform, "Top", 2);
+                top = GetExistingTilemap(root.transform, "Top", 3);
                 cameraObject = FindRootObject(scene, "Main Camera");
             }
             else
@@ -259,7 +413,7 @@ namespace RetroRPG.Editor
                 root.AddComponent<Grid>();
                 bottom = CreateTilemap(root.transform, "Bottom", 0);
                 middle = CreateTilemap(root.transform, "Middle", 1);
-                top = CreateTilemap(root.transform, "Top", 2);
+                top = CreateTilemap(root.transform, "Top", 3);
                 cameraObject = new GameObject("Main Camera", typeof(Camera), typeof(PixelPerfectCamera));
             }
 
@@ -268,16 +422,42 @@ namespace RetroRPG.Editor
 
             context.FillTilemaps(bottom, middle, top);
 
-            var camera = cameraObject.GetComponent<Camera>();
+            var camera = GetOrAddComponent<Camera>(cameraObject);
             camera.orthographic = true;
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = Color.black;
             camera.tag = "MainCamera";
             camera.transform.position = new Vector3(context.Map.Width * 0.5f, context.Map.Height * 0.5f, -10f);
-            var pixelPerfect = cameraObject.GetComponent<PixelPerfectCamera>();
+            var pixelPerfect = GetOrAddComponent<PixelPerfectCamera>(cameraObject);
             pixelPerfect.assetsPPU = 16;
             pixelPerfect.refResolutionX = 240;
             pixelPerfect.refResolutionY = 160;
+
+            var collisionObject = GetOrCreateChild(root.transform, "Collision");
+            var collisionMap = GetOrAddComponent<GridCollisionMap>(collisionObject);
+            collisionMap.Configure(
+                context.Map.Width,
+                context.Map.Height,
+                context.CreateBottomUpCollision(),
+                context.CreateBottomUpElevation(),
+                context.CreateEmptyBottomUpEdges());
+
+            var playerObject = GetOrCreateChild(root.transform, "Player");
+            var playerRenderer = GetOrAddComponent<SpriteRenderer>(playerObject);
+            playerRenderer.sortingLayerName = "Default";
+            playerRenderer.sortingOrder = 2;
+            var playerAnimator = GetOrAddComponent<DirectionalSpriteAnimator>(playerObject);
+            playerAnimator.Configure(
+                playerRenderer,
+                context.CreatePlayerSequences(SpriteAnimationState.Idle),
+                context.CreatePlayerSequences(SpriteAnimationState.Walking));
+            var playerController = GetOrAddComponent<PlayerController>(playerObject);
+            playerController.Configure(collisionMap, PlayerSpawnCell, 3, 4f);
+            playerController.InputEnabled = true;
+
+            var follow = GetOrAddComponent<PixelPerfectCameraFollow>(cameraObject);
+            follow.ConfigureForMap(camera, playerObject.transform, collisionMap);
+            follow.ApplyFollow();
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -327,6 +507,27 @@ namespace RetroRPG.Editor
             renderer.sortingLayerName = "Default";
             renderer.sortingOrder = sortingOrder;
             return child.GetComponent<Tilemap>();
+        }
+
+        private static GameObject GetOrCreateChild(Transform parent, string name)
+        {
+            var child = parent.Find(name);
+            if (child != null)
+            {
+                return child.gameObject;
+            }
+
+            var created = new GameObject(name);
+            created.transform.SetParent(parent, false);
+            return created;
+        }
+
+        private static T GetOrAddComponent<T>(GameObject gameObject) where T : Component
+        {
+            var component = gameObject.GetComponent<T>();
+            // Unity components can be "fake null" after a script/assembly change.
+            // Use UnityEngine.Object's null operator instead of CLR null coalescing.
+            return component != null ? component : gameObject.AddComponent<T>();
         }
 
         private static ImportManifest LoadManifest()
@@ -421,19 +622,24 @@ namespace RetroRPG.Editor
             private readonly Dictionary<int, PaletteDefinition> palettes;
             private readonly Dictionary<int, MetatileDefinition> metatiles;
             private readonly Dictionary<int, TileAnimationDefinition> animations;
+            private readonly Dictionary<int, IndexedSpriteFrameDefinition> playerFrames;
             private readonly Dictionary<TileKey, TileBase> unityTiles = new Dictionary<TileKey, TileBase>();
             private readonly SortedDictionary<TileKey, Sprite[]> sprites = new SortedDictionary<TileKey, Sprite[]>(new TileKeyComparer());
+            private readonly SortedDictionary<PlayerFrameKey, Sprite> playerSprites = new SortedDictionary<PlayerFrameKey, Sprite>(new PlayerFrameKeyComparer());
 
-            public BuildContext(MapDefinition map)
+            public BuildContext(MapDefinition map, OverworldSpriteDefinition playerSprite)
             {
                 Map = map;
+                PlayerSprite = playerSprite;
                 tiles = BuildTileLookup(map);
                 palettes = BuildPaletteLookup(map);
                 metatiles = BuildMetatileLookup(map);
                 animations = BuildAnimationLookup(map.PrimaryTileset, map.SecondaryTileset);
+                playerFrames = BuildPlayerFrameLookup(playerSprite);
             }
 
             public MapDefinition Map { get; }
+            public OverworldSpriteDefinition PlayerSprite { get; }
 
             public void Prepare(Func<string, float, bool> shouldCancel)
             {
@@ -446,6 +652,21 @@ namespace RetroRPG.Editor
                         var subtile = metatile.Subtiles[i];
                         var key = new TileKey(subtile.TileIndex, subtile.PaletteIndex, subtile.HorizontalFlip, subtile.VerticalFlip);
                         if (!sprites.ContainsKey(key)) sprites.Add(key, null);
+                    }
+                }
+
+                for (var animationIndex = 0; animationIndex < PlayerSprite.Animations.Count; animationIndex++)
+                {
+                    var animation = PlayerSprite.Animations[animationIndex];
+                    for (var stepIndex = 0; stepIndex < animation.Steps.Count; stepIndex++)
+                    {
+                        ThrowIfCancelled(shouldCancel, "Preparing player sprite keys", 0.30f);
+                        var step = animation.Steps[stepIndex];
+                        var key = new PlayerFrameKey(step.FrameIndex, step.HorizontalFlip, step.VerticalFlip);
+                        if (!playerSprites.ContainsKey(key))
+                        {
+                            playerSprites.Add(key, null);
+                        }
                     }
                 }
             }
@@ -465,6 +686,84 @@ namespace RetroRPG.Editor
                     unityTiles[key] = CreateTileAsset(key, frames, animation, owned);
                     index++;
                 }
+            }
+
+            public void WritePlayerSprites(ISet<string> owned)
+            {
+                var orderedKeys = new List<PlayerFrameKey>(playerSprites.Keys);
+                for (var keyIndex = 0; keyIndex < orderedKeys.Count; keyIndex++)
+                {
+                    var key = orderedKeys[keyIndex];
+                    var path = OutputRoot + "/Player/" + key.StableName + ".png";
+                    WritePlayerTexture(path, playerFrames[key.FrameIndex], PlayerSprite.Palette, key);
+                    ConfigureTextureImporter(path, true);
+                    owned.Add(path);
+                    var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    if (sprite == null)
+                    {
+                        throw new InvalidOperationException("Unity did not import generated player sprite " + path + ".");
+                    }
+
+                    playerSprites[key] = sprite;
+                }
+            }
+
+            public byte[] CreateBottomUpCollision()
+            {
+                var result = new byte[Map.Cells.Count];
+                CopyBottomUpCells(result, cell => checked((byte)cell.Collision));
+                return result;
+            }
+
+            public byte[] CreateBottomUpElevation()
+            {
+                var result = new byte[Map.Cells.Count];
+                CopyBottomUpCells(result, cell => checked((byte)cell.Elevation));
+                return result;
+            }
+
+            public GridDirectionMask[] CreateEmptyBottomUpEdges()
+            {
+                return new GridDirectionMask[Map.Cells.Count];
+            }
+
+            public DirectionalSpriteSequence[] CreatePlayerSequences(SpriteAnimationState state)
+            {
+                var sequences = new DirectionalSpriteSequence[4];
+                for (var animationIndex = 0; animationIndex < PlayerSprite.Animations.Count; animationIndex++)
+                {
+                    var animation = PlayerSprite.Animations[animationIndex];
+                    if (animation.State != state)
+                    {
+                        continue;
+                    }
+
+                    var frames = new Sprite[animation.Steps.Count];
+                    for (var stepIndex = 0; stepIndex < animation.Steps.Count; stepIndex++)
+                    {
+                        var step = animation.Steps[stepIndex];
+                        var key = new PlayerFrameKey(step.FrameIndex, step.HorizontalFlip, step.VerticalFlip);
+                        if (!playerSprites.TryGetValue(key, out var sprite) || sprite == null)
+                        {
+                            throw new InvalidOperationException("Player sprite assets were not prepared before scene creation.");
+                        }
+
+                        frames[stepIndex] = sprite;
+                    }
+
+                    sequences[SpriteDirectionToSequenceIndex(animation.Direction)] =
+                        new DirectionalSpriteSequence(frames, animation.Steps[0].DurationTicks);
+                }
+
+                for (var i = 0; i < sequences.Length; i++)
+                {
+                    if (sequences[i] == null)
+                    {
+                        throw new InvalidOperationException("Player sprite sequences are incomplete.");
+                    }
+                }
+
+                return sequences;
             }
 
             public void FillTilemaps(Tilemap bottom, Tilemap middle, Tilemap top)
@@ -588,6 +887,46 @@ namespace RetroRPG.Editor
                 return result;
             }
 
+            private static Dictionary<int, IndexedSpriteFrameDefinition> BuildPlayerFrameLookup(OverworldSpriteDefinition playerSprite)
+            {
+                var result = new Dictionary<int, IndexedSpriteFrameDefinition>();
+                for (var i = 0; i < playerSprite.Frames.Count; i++)
+                {
+                    result.Add(playerSprite.Frames[i].Index, playerSprite.Frames[i]);
+                }
+
+                return result;
+            }
+
+            private void CopyBottomUpCells(byte[] target, Func<MapCellDefinition, byte> selector)
+            {
+                for (var topDownY = 0; topDownY < Map.Height; topDownY++)
+                {
+                    var runtimeY = Map.Height - 1 - topDownY;
+                    for (var x = 0; x < Map.Width; x++)
+                    {
+                        target[(runtimeY * Map.Width) + x] = selector(Map.Cells[(topDownY * Map.Width) + x]);
+                    }
+                }
+            }
+
+            private static int SpriteDirectionToSequenceIndex(SpriteDirection direction)
+            {
+                switch (direction)
+                {
+                    case SpriteDirection.South:
+                        return 0;
+                    case SpriteDirection.North:
+                        return 1;
+                    case SpriteDirection.West:
+                        return 2;
+                    case SpriteDirection.East:
+                        return 3;
+                    default:
+                        throw new InvalidOperationException("Player animation has an invalid direction.");
+                }
+            }
+
             private static void WriteTexture(string assetPath, IndexedTileDefinition tile, PaletteDefinition palette, TileKey key)
             {
                 var colors = new Color32[IndexedTileDefinition.PixelCount];
@@ -617,7 +956,37 @@ namespace RetroRPG.Editor
                 UnityEngine.Object.DestroyImmediate(texture);
             }
 
-            private static void ConfigureTextureImporter(string assetPath)
+            private static void WritePlayerTexture(
+                string assetPath,
+                IndexedSpriteFrameDefinition frame,
+                IReadOnlyList<Rgba32> palette,
+                PlayerFrameKey key)
+            {
+                var colors = new Color32[checked(frame.Width * frame.Height)];
+                for (var y = 0; y < frame.Height; y++)
+                {
+                    for (var x = 0; x < frame.Width; x++)
+                    {
+                        var sourceX = key.HorizontalFlip ? frame.Width - 1 - x : x;
+                        var sourceY = key.VerticalFlip ? frame.Height - 1 - y : y;
+                        var paletteIndex = frame.Pixels[(sourceY * frame.Width) + sourceX];
+                        var paletteEntry = palette[paletteIndex];
+                        colors[((frame.Height - 1 - y) * frame.Width) + x] = new Color32(
+                            paletteEntry.Red,
+                            paletteEntry.Green,
+                            paletteEntry.Blue,
+                            paletteIndex == 0 ? (byte)0 : paletteEntry.Alpha);
+                    }
+                }
+
+                var texture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, true);
+                texture.SetPixels32(colors);
+                texture.Apply(false, false);
+                File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+                UnityEngine.Object.DestroyImmediate(texture);
+            }
+
+            private static void ConfigureTextureImporter(string assetPath, bool playerSprite = false)
             {
                 AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                 var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
@@ -629,6 +998,14 @@ namespace RetroRPG.Editor
                 importer.mipmapEnabled = false;
                 importer.textureCompression = TextureImporterCompression.Uncompressed;
                 importer.alphaIsTransparency = false;
+                if (playerSprite)
+                {
+                    var settings = new TextureImporterSettings();
+                    importer.ReadTextureSettings(settings);
+                    settings.spriteAlignment = (int)SpriteAlignment.Custom;
+                    settings.spritePivot = new Vector2(0.5f, 0.25f);
+                    importer.SetTextureSettings(settings);
+                }
                 importer.SaveAndReimport();
             }
 
@@ -639,14 +1016,27 @@ namespace RetroRPG.Editor
                     return string.CompareOrdinal(left.StableName, right.StableName);
                 }
             }
+
+            private sealed class PlayerFrameKeyComparer : IComparer<PlayerFrameKey>
+            {
+                public int Compare(PlayerFrameKey left, PlayerFrameKey right)
+                {
+                    return string.CompareOrdinal(left.StableName, right.StableName);
+                }
+            }
         }
 
         private static class DeterministicJson
         {
             public static string SerializeMap(MapDefinition map)
             {
+                return SerializeMap(map, null);
+            }
+
+            public static string SerializeMap(MapDefinition map, OverworldSpriteDefinition playerSprite)
+            {
                 var builder = new StringBuilder(4096);
-                builder.Append("{\n  \"schemaVersion\": 1,\n  \"id\": ");
+                builder.Append("{\n  \"schemaVersion\": 2,\n  \"id\": ");
                 AppendString(builder, map.Id);
                 builder.Append(",\n  \"name\": ");
                 AppendString(builder, map.Name);
@@ -667,8 +1057,97 @@ namespace RetroRPG.Editor
                         .Append(",\"collision\":").Append(cell.Collision)
                         .Append(",\"elevation\":").Append(cell.Elevation).Append('}');
                 }
-                builder.Append("\n  ]\n}\n");
+                builder.Append("\n  ]");
+                if (playerSprite != null)
+                {
+                    builder.Append(",\n  \"playerSprite\": ");
+                    AppendPlayerSprite(builder, playerSprite);
+                }
+                builder.Append("\n}\n");
                 return builder.ToString();
+            }
+
+            private static void AppendPlayerSprite(StringBuilder builder, OverworldSpriteDefinition playerSprite)
+            {
+                builder.Append("{\"id\":");
+                AppendString(builder, playerSprite.Id);
+                builder.Append(",\"width\":").Append(playerSprite.Width)
+                    .Append(",\"height\":").Append(playerSprite.Height)
+                    .Append(",\"palette\":[");
+                for (var colorIndex = 0; colorIndex < playerSprite.Palette.Count; colorIndex++)
+                {
+                    var color = playerSprite.Palette[colorIndex];
+                    builder.Append(colorIndex == 0 ? string.Empty : ",")
+                        .Append("[").Append(color.Red).Append(',').Append(color.Green).Append(',')
+                        .Append(color.Blue).Append(',').Append(color.Alpha).Append(']');
+                }
+
+                var orderedFrames = new List<IndexedSpriteFrameDefinition>(playerSprite.Frames);
+                orderedFrames.Sort((left, right) => left.Index.CompareTo(right.Index));
+                builder.Append("],\"frames\":[");
+                for (var frameIndex = 0; frameIndex < orderedFrames.Count; frameIndex++)
+                {
+                    var frame = orderedFrames[frameIndex];
+                    builder.Append(frameIndex == 0 ? string.Empty : ",")
+                        .Append("{\"index\":").Append(frame.Index)
+                        .Append(",\"width\":").Append(frame.Width)
+                        .Append(",\"height\":").Append(frame.Height)
+                        .Append(",\"pixels\":[");
+                    for (var pixelIndex = 0; pixelIndex < frame.Pixels.Count; pixelIndex++)
+                    {
+                        builder.Append(pixelIndex == 0 ? string.Empty : ",").Append(frame.Pixels[pixelIndex]);
+                    }
+
+                    builder.Append("]}");
+                }
+
+                builder.Append("],\"animations\":[");
+                var animationIndex = 0;
+                for (var directionValue = (int)SpriteDirection.South; directionValue <= (int)SpriteDirection.East; directionValue++)
+                {
+                    var direction = (SpriteDirection)directionValue;
+                    for (var stateValue = (int)SpriteAnimationState.Idle; stateValue <= (int)SpriteAnimationState.Walking; stateValue++)
+                    {
+                        var state = (SpriteAnimationState)stateValue;
+                        var animation = FindPlayerAnimation(playerSprite, direction, state);
+                        builder.Append(animationIndex == 0 ? string.Empty : ",").Append("{\"direction\":");
+                        AppendString(builder, animation.Direction.ToString());
+                        builder.Append(",\"state\":");
+                        AppendString(builder, animation.State.ToString());
+                        builder.Append(",\"steps\":[");
+                        for (var stepIndex = 0; stepIndex < animation.Steps.Count; stepIndex++)
+                        {
+                            var step = animation.Steps[stepIndex];
+                            builder.Append(stepIndex == 0 ? string.Empty : ",")
+                                .Append("{\"frame\":").Append(step.FrameIndex)
+                                .Append(",\"hFlip\":").Append(step.HorizontalFlip ? "true" : "false")
+                                .Append(",\"vFlip\":").Append(step.VerticalFlip ? "true" : "false")
+                                .Append(",\"durationTicks\":").Append(step.DurationTicks).Append('}');
+                        }
+
+                        builder.Append("]}");
+                        animationIndex++;
+                    }
+                }
+
+                builder.Append("]}");
+            }
+
+            private static DirectionalSpriteAnimationDefinition FindPlayerAnimation(
+                OverworldSpriteDefinition playerSprite,
+                SpriteDirection direction,
+                SpriteAnimationState state)
+            {
+                for (var i = 0; i < playerSprite.Animations.Count; i++)
+                {
+                    var animation = playerSprite.Animations[i];
+                    if (animation.Direction == direction && animation.State == state)
+                    {
+                        return animation;
+                    }
+                }
+
+                throw new InvalidOperationException("Player sprite is missing a required animation.");
             }
 
             private static void AppendTileset(StringBuilder builder, TilesetDefinition tileset)
