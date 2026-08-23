@@ -11,6 +11,8 @@ using RetroRPG.Unity;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.Tilemaps;
@@ -423,6 +425,20 @@ namespace RetroRPG.Editor
             ImportReport report,
             Func<string, float, bool> shouldCancel)
         {
+            Import(bundle, playerSprite, objectSprites, dialogueCatalog, encounterCatalog, null, report, shouldCancel);
+        }
+
+        /// <summary>Imports the complete bounded exploration and battle snapshot.</summary>
+        public static void Import(
+            MapBundleDefinition bundle,
+            OverworldSpriteDefinition playerSprite,
+            ObjectSpriteCatalogDefinition objectSprites,
+            DialogueCatalogDefinition dialogueCatalog,
+            EncounterCatalogDefinition encounterCatalog,
+            BattleContentCatalogDefinition battleContent,
+            ImportReport report,
+            Func<string, float, bool> shouldCancel)
+        {
             if (report == null) throw new ArgumentNullException(nameof(report));
             if (report.HasErrors) throw new InvalidOperationException("An import report with errors cannot generate assets.");
             ThrowIfCancelled(shouldCancel, "Validating IR", 0.05f);
@@ -430,6 +446,7 @@ namespace RetroRPG.Editor
             if (objectSprites != null) ObjectEventAssetBuilder.Validate(bundle, objectSprites);
             if (dialogueCatalog != null) ValidateDialogues(bundle, dialogueCatalog);
             if (encounterCatalog != null) ValidateEncounters(bundle, encounterCatalog);
+            if (battleContent != null) ValidateBattleContent(encounterCatalog, battleContent);
 
             // All object discovery and JSON construction completes before generated assets are touched.
             var contexts = new List<BuildContext>(bundle.Maps.Count);
@@ -472,9 +489,10 @@ namespace RetroRPG.Editor
                 }
                 FindPalletTownContext(contexts).WritePlayerSprites(owned);
                 var objectAssets = objectSprites == null ? null : ObjectEventAssetBuilder.WriteAssets(objectSprites, owned);
-                CreateScene(contexts, objectAssets, dialogueCatalog, encounterCatalog, owned);
+                var battleSprites = battleContent == null ? null : WriteBattleSprites(battleContent, owned);
+                CreateScene(contexts, objectAssets, dialogueCatalog, encounterCatalog, battleContent, battleSprites, owned);
                 owned.Add(ManifestPath);
-                WriteText(ManifestPath, JsonUtility.ToJson(new ImportManifest { schemaVersion = 3, ownedAssets = ToArray(owned) }, true) + "\n");
+                WriteText(ManifestPath, JsonUtility.ToJson(new ImportManifest { schemaVersion = 4, ownedAssets = ToArray(owned) }, true) + "\n");
                 RemoveStaleOwnedAssets(priorManifest, owned);
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
@@ -533,6 +551,8 @@ namespace RetroRPG.Editor
             ObjectEventAssetBuilder.Assets objectAssets,
             DialogueCatalogDefinition dialogueDefinitions,
             EncounterCatalogDefinition encounterDefinitions,
+            BattleContentCatalogDefinition battleContent,
+            IList<ClassicBattleSpriteEntry> battleSprites,
             ISet<string> owned)
         {
             Scene scene = File.Exists(ToAbsolutePath(ScenePath))
@@ -617,6 +637,10 @@ namespace RetroRPG.Editor
             var follow = GetOrAddComponent<PixelPerfectCameraFollow>(cameraObject);
             follow.ConfigureForMap(camera, playerObject.transform, palletTownRoot.CollisionMap);
 
+            var eventSystemObject = FindRootObjectOrNull(scene, "Event System") ?? new GameObject("Event System");
+            GetOrAddComponent<EventSystem>(eventSystemObject);
+            GetOrAddComponent<InputSystemUIInputModule>(eventSystemObject);
+
             var runtimeObject = FindRootObjectOrNull(scene, "Runtime Map Catalog") ?? new GameObject("Runtime Map Catalog");
             var catalog = GetOrAddComponent<RuntimeMapCatalog>(runtimeObject);
             catalog.Configure(mapRoots);
@@ -632,9 +656,8 @@ namespace RetroRPG.Editor
             var interactionSystem = GetOrAddComponent<InteractionSystem>(runtimeObject);
             interactionSystem.Configure(playerController, transitions, catalog, runtimeInteractions, dialogueController);
             var runtimeEncounters = GetOrAddComponent<RuntimeEncounterCatalog>(runtimeObject);
-            CreateRuntimeEncounters(contexts, encounterDefinitions, out var encounterTables, out var encounterCells);
+            CreateRuntimeEncounters(contexts, encounterDefinitions, battleContent, out var encounterTables, out var encounterCells);
             runtimeEncounters.Configure(encounterTables, encounterCells);
-            var encounterView = CreateEncounterDebugUi(scene);
             var encounterSystem = GetOrAddComponent<EncounterSystem>(runtimeObject);
             encounterSystem.Configure(
                 playerController,
@@ -643,7 +666,19 @@ namespace RetroRPG.Editor
                 runtimeEncounters,
                 dialogueController,
                 null,
-                encounterView);
+                null);
+            if (battleContent != null)
+            {
+                RemoveLegacyEncounterDebugUi(scene);
+                CreateRuntimeBattleContent(battleContent, out var creatures, out var skills, out var party);
+                var runtimeBattleContent = GetOrAddComponent<RuntimeBattleContentCatalog>(runtimeObject);
+                runtimeBattleContent.Configure(creatures, skills);
+                var coordinator = GetOrAddComponent<BattleCoordinator>(runtimeObject);
+                var battleView = CreateBattleUi(scene, coordinator, battleSprites);
+                coordinator.Configure(encounterSystem, playerController, transitions, runtimeBattleContent, battleView);
+                var partyStats = party.CreateStatsForLevel(5);
+                coordinator.ConfigureParty(party.Key, 5, partyStats.HitPoints);
+            }
             if (encounterCells.Count > 0)
             {
                 var debugMaps = GetOrAddComponent<DebugMapHotkeys>(runtimeObject);
@@ -719,6 +754,117 @@ namespace RetroRPG.Editor
             }
         }
 
+        private static void ValidateBattleContent(EncounterCatalogDefinition encounters, BattleContentCatalogDefinition battleContent)
+        {
+            if (encounters == null) throw new InvalidOperationException("Battle content requires an encounter catalog.");
+            if (!battleContent.TryGetCreature(battleContent.DefaultPlayerCreatureId, out _)) throw new InvalidOperationException("Battle content has no default player creature.");
+            for (var tableIndex = 0; tableIndex < encounters.Tables.Count; tableIndex++)
+            {
+                var table = encounters.Tables[tableIndex];
+                for (var entryIndex = 0; entryIndex < table.Entries.Count; entryIndex++)
+                {
+                    if (!battleContent.TryGetCreatureBySourceId(table.Entries[entryIndex].SpeciesId, out _))
+                    {
+                        throw new InvalidOperationException("Every selected encounter species must exist in battle content.");
+                    }
+                }
+            }
+        }
+
+        private static void CreateRuntimeBattleContent(
+            BattleContentCatalogDefinition source,
+            out List<CreatureSpec> creatures,
+            out List<SkillSpec> skills,
+            out CreatureSpec defaultPlayer)
+        {
+            skills = new List<SkillSpec>(source.Skills.Count);
+            for (var index = 0; index < source.Skills.Count; index++)
+            {
+                var skill = source.Skills[index];
+                skills.Add(new SkillSpec(skill.Id, skill.Power));
+            }
+
+            creatures = new List<CreatureSpec>(source.Creatures.Count);
+            defaultPlayer = null;
+            for (var index = 0; index < source.Creatures.Count; index++)
+            {
+                var creature = source.Creatures[index];
+                var skillKeys = new List<string>(creature.SkillIds.Count);
+                for (var skillIndex = 0; skillIndex < creature.SkillIds.Count; skillIndex++) skillKeys.Add(creature.SkillIds[skillIndex]);
+                var runtimeCreature = new CreatureSpec(
+                    creature.Id,
+                    new BattleStats(creature.BaseStats.HitPoints, creature.BaseStats.Attack, creature.BaseStats.Defense, creature.BaseStats.Speed),
+                    skillKeys);
+                creatures.Add(runtimeCreature);
+                if (string.Equals(creature.Id, source.DefaultPlayerCreatureId, StringComparison.Ordinal)) defaultPlayer = runtimeCreature;
+            }
+
+            if (defaultPlayer == null) throw new InvalidOperationException("Default player creature was not converted to runtime content.");
+        }
+
+        private static List<ClassicBattleSpriteEntry> WriteBattleSprites(BattleContentCatalogDefinition catalog, ISet<string> owned)
+        {
+            var root = OutputRoot + "/Battle";
+            Directory.CreateDirectory(ToAbsolutePath(root));
+            var result = new List<ClassicBattleSpriteEntry>(catalog.Sprites.Count);
+            for (var index = 0; index < catalog.Sprites.Count; index++)
+            {
+                var source = catalog.Sprites[index];
+                var safeId = source.CreatureId.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
+                var frontPath = root + "/" + safeId + "_front.png";
+                var backPath = root + "/" + safeId + "_back.png";
+                WriteBattleTexture(frontPath, source.Front, source.Palette);
+                WriteBattleTexture(backPath, source.Back, source.Palette);
+                ConfigureBattleTexture(frontPath);
+                ConfigureBattleTexture(backPath);
+                var front = AssetDatabase.LoadAssetAtPath<Sprite>(frontPath);
+                var back = AssetDatabase.LoadAssetAtPath<Sprite>(backPath);
+                if (front == null || back == null) throw new InvalidOperationException("Generated battle sprites could not be loaded.");
+                var entry = new ClassicBattleSpriteEntry();
+                entry.Configure(source.CreatureId, front, back);
+                result.Add(entry);
+                owned.Add(frontPath);
+                owned.Add(backPath);
+            }
+            return result;
+        }
+
+        private static void WriteBattleTexture(string assetPath, IndexedSpriteFrameDefinition frame, IReadOnlyList<Rgba32> palette)
+        {
+            var colors = new Color32[checked(frame.Width * frame.Height)];
+            for (var y = 0; y < frame.Height; y++)
+            {
+                for (var x = 0; x < frame.Width; x++)
+                {
+                    var paletteIndex = frame.Pixels[checked((y * frame.Width) + x)];
+                    if (paletteIndex >= palette.Count) throw new InvalidOperationException("Battle sprite palette index is outside its palette.");
+                    var color = palette[paletteIndex];
+                    colors[checked(((frame.Height - 1 - y) * frame.Width) + x)] = new Color32(color.Red, color.Green, color.Blue, paletteIndex == 0 ? (byte)0 : color.Alpha);
+                }
+            }
+
+            var texture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, true);
+            texture.SetPixels32(colors);
+            texture.Apply(false, false);
+            File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(texture);
+        }
+
+        private static void ConfigureBattleTexture(string assetPath)
+        {
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null) throw new InvalidOperationException("Generated battle texture has no TextureImporter: " + assetPath);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.spritePixelsPerUnit = 16f;
+            importer.filterMode = FilterMode.Point;
+            importer.mipmapEnabled = false;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.alphaIsTransparency = false;
+            importer.SaveAndReimport();
+        }
+
         private static List<RetroRPG.Runtime.DialogueDefinition> CreateRuntimeDialogues(
             IList<BuildContext> contexts,
             DialogueCatalogDefinition catalog)
@@ -775,6 +921,7 @@ namespace RetroRPG.Editor
         private static void CreateRuntimeEncounters(
             IList<BuildContext> contexts,
             EncounterCatalogDefinition catalog,
+            BattleContentCatalogDefinition battleContent,
             out List<RetroRPG.Runtime.EncounterTableDefinition> tables,
             out List<EncounterCellDefinition> cells)
         {
@@ -791,8 +938,14 @@ namespace RetroRPG.Editor
                 for (var slotIndex = 0; slotIndex < source.Entries.Count; slotIndex++)
                 {
                     var entry = source.Entries[slotIndex];
+                    var creatureKey = "species:" + entry.SpeciesId.ToString(CultureInfo.InvariantCulture);
+                    if (battleContent != null)
+                    {
+                        if (!battleContent.TryGetCreatureBySourceId(entry.SpeciesId, out var creature)) throw new InvalidOperationException("Encounter species has no battle-content creature.");
+                        creatureKey = creature.Id;
+                    }
                     slots.Add(new EncounterSlotDefinition(
-                        "species:" + entry.SpeciesId.ToString(CultureInfo.InvariantCulture),
+                        creatureKey,
                         entry.Weight,
                         entry.MinimumLevel,
                         entry.MaximumLevel));
@@ -907,6 +1060,86 @@ namespace RetroRPG.Editor
             label.alignment = TextAnchor.MiddleCenter;
             var view = GetOrAddComponent<ClassicEncounterDebugView>(panel);
             view.Configure(group, label);
+            return view;
+        }
+
+        private static void RemoveLegacyEncounterDebugUi(Scene scene)
+        {
+            var root = FindRootObjectOrNull(scene, "Classic Dialogue UI");
+            var legacy = root == null ? null : root.transform.Find("Encounter Debug Panel");
+            if (legacy != null) UnityEngine.Object.DestroyImmediate(legacy.gameObject);
+        }
+
+        private static ClassicBattleView CreateBattleUi(Scene scene, BattleCoordinator coordinator, IList<ClassicBattleSpriteEntry> sprites)
+        {
+            var root = FindRootObjectOrNull(scene, "Classic Dialogue UI") ?? new GameObject("Classic Dialogue UI");
+            var panel = GetOrCreateUiChild(root.transform, "Battle Panel");
+            panel.transform.SetAsLastSibling();
+            var panelRect = (RectTransform)panel.transform;
+            panelRect.anchorMin = Vector2.zero;
+            panelRect.anchorMax = Vector2.one;
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+            var background = GetOrAddComponent<Image>(panel);
+            background.color = new Color(0.06f, 0.12f, 0.10f, 0.98f);
+            var group = GetOrAddComponent<CanvasGroup>(panel);
+
+            var opponentObject = GetOrCreateUiChild(panel.transform, "Opponent Sprite");
+            var opponentRect = (RectTransform)opponentObject.transform;
+            opponentRect.anchorMin = new Vector2(0.58f, 0.52f);
+            opponentRect.anchorMax = new Vector2(0.94f, 0.94f);
+            opponentRect.offsetMin = Vector2.zero;
+            opponentRect.offsetMax = Vector2.zero;
+            var opponentImage = GetOrAddComponent<Image>(opponentObject);
+            opponentImage.preserveAspect = true;
+            opponentImage.raycastTarget = false;
+
+            var playerObject = GetOrCreateUiChild(panel.transform, "Player Creature Sprite");
+            var playerRect = (RectTransform)playerObject.transform;
+            playerRect.anchorMin = new Vector2(0.06f, 0.24f);
+            playerRect.anchorMax = new Vector2(0.46f, 0.70f);
+            playerRect.offsetMin = Vector2.zero;
+            playerRect.offsetMax = Vector2.zero;
+            var playerImage = GetOrAddComponent<Image>(playerObject);
+            playerImage.preserveAspect = true;
+            playerImage.raycastTarget = false;
+
+            var statusObject = GetOrCreateUiChild(panel.transform, "Battle Status");
+            var statusRect = (RectTransform)statusObject.transform;
+            statusRect.anchorMin = new Vector2(0.04f, 0.02f);
+            statusRect.anchorMax = new Vector2(0.63f, 0.28f);
+            statusRect.offsetMin = new Vector2(5f, 4f);
+            statusRect.offsetMax = new Vector2(-5f, -4f);
+            var status = GetOrAddComponent<Text>(statusObject);
+            status.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            status.fontSize = 8;
+            status.color = Color.white;
+            status.alignment = TextAnchor.MiddleLeft;
+
+            var actionObject = GetOrCreateUiChild(panel.transform, "Primary Action");
+            var actionRect = (RectTransform)actionObject.transform;
+            actionRect.anchorMin = new Vector2(0.68f, 0.06f);
+            actionRect.anchorMax = new Vector2(0.95f, 0.22f);
+            actionRect.offsetMin = Vector2.zero;
+            actionRect.offsetMax = Vector2.zero;
+            var actionImage = GetOrAddComponent<Image>(actionObject);
+            actionImage.color = new Color(0.92f, 0.92f, 0.82f, 1f);
+            var button = GetOrAddComponent<Button>(actionObject);
+            button.targetGraphic = actionImage;
+            var labelObject = GetOrCreateUiChild(actionObject.transform, "Label");
+            var labelRect = (RectTransform)labelObject.transform;
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+            var label = GetOrAddComponent<Text>(labelObject);
+            label.font = status.font;
+            label.fontSize = 8;
+            label.color = Color.black;
+            label.alignment = TextAnchor.MiddleCenter;
+
+            var view = GetOrAddComponent<ClassicBattleView>(panel);
+            view.Configure(group, status, label, button, coordinator, playerImage, opponentImage, sprites);
             return view;
         }
 

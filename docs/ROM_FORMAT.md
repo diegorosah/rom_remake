@@ -598,3 +598,57 @@ whitelisted Route 1 header and does not scan arbitrary wild headers.
 Primary references are `include/wild_encounter.h`, the Route 1 map/layout data,
 `src/wild_encounter.c`, and the generated wild encounter declarations in
 `pret/pokefirered` at commit `c75f352304d529f6ba92d4f74b9cf8b5c3810788`.
+
+## MVP 7 — Minimal battle content (audited rev1)
+
+The first playable battle uses a deliberately narrow data circuit: a fixed
+Bulbasaur at level 5 against the Pidgey or Rattata and level already selected by
+the audited Route 1 encounter table. All three creatures use only Tackle. The
+parser accepts only the exact supported fingerprint and the species IDs 1, 16,
+and 19 plus move ID 33.
+
+The `gSpeciesInfo` table begins at file offset `0x2547F4`, has stride `0x1C`, and
+is indexed by species ID. The verified base-stat records are:
+
+| Species | ID | HP | Attack | Defense | Speed | Sp. Attack | Sp. Defense | Types |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| Bulbasaur | 1 | 45 | 49 | 49 | 45 | 65 | 65 | Grass / Poison |
+| Pidgey | 16 | 40 | 45 | 40 | 56 | 35 | 35 | Normal / Flying |
+| Rattata | 19 | 30 | 56 | 35 | 72 | 25 | 35 | Normal / Normal |
+
+The `gBattleMoves` table begins at `0x250C74` with 12-byte records. Move 33 is at
+`0x250E00`: normal-hit effect, power 35, Normal type, accuracy 95, PP 35, zero
+secondary-effect chance, single target, priority zero, and flags `0x33`. The
+selected species learn Tackle at level 1 according to the corresponding primary
+decomp declarations. This slice validates the exact record but does not import or
+interpret the general learnset machinery.
+
+Compressed sprite sheet tables are ABI-aligned eight-byte records containing a
+GBA pointer, output size, and tag. The front table is at `0x23511C`, the back
+table at `0x2365BC`, and the palette table at `0x23737C`. Palette entries contain
+a pointer, tag, and padding. Verified resources are:
+
+| Species | Front | Back | Palette |
+|---|---:|---:|---:|
+| Bulbasaur | `0xD2FBD4` | `0xD2FEA0` | `0xD2FE78` |
+| Pidgey | `0xD39FD8` | `0xD3A278` | `0xD3A250` |
+| Rattata | `0xD3C2AC` | `0xD3C52C` | `0xD3C504` |
+
+Every sheet is LZ10-compressed and declares exactly `0x800` output bytes (64×64
+at 4bpp). Every palette is LZ10-compressed and declares exactly `0x20` output
+bytes (16 BGR555 colors). Tags must equal the species ID. Bounds, canonical GBA
+pointer conversion, record values, decompression input/output, 4bpp pixel indexes,
+and palette conversion are validated before content reaches IR. Animation tables,
+sprite coordinates, arbitrary species/moves, and executable ROM behavior remain
+out of scope.
+
+The preview battle policy is intentionally not claimed as native emulation: fixed
+Bulbasaur level 5, zero IVs/EVs, neutral nature, and no abilities, critical hits,
+STAB, type chart, random damage, status, PP, native AI, or native effect bytecode.
+Runtime uses the documented deterministic `BasicPhysicalDamage` rule from the
+game-agnostic Core. ROM data is declarative input only and no ROM code executes.
+
+Primary references are the species, move, learnset, and compressed sprite table
+declarations plus `include/sprite.h` in `pret/pokefirered` at commit
+`c75f352304d529f6ba92d4f74b9cf8b5c3810788`; all offsets and values above were
+independently checked against the supported FireRed USA rev1 snapshot.

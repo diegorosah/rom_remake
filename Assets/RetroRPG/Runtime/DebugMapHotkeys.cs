@@ -34,8 +34,10 @@ namespace RetroRPG.Runtime
             returnElevation = configuredReturnElevation;
         }
 
-        public bool EnterRoute() => transitions != null && transitions.TryActivateMapImmediately(routeMapId, routeCell, routeElevation, GridDirection.Right);
-        public bool ReturnToTown() => transitions != null && transitions.TryActivateMapImmediately(returnMapId, returnCell, returnElevation, GridDirection.Down);
+        public bool EnterRoute() => CanActivate() && transitions.TryActivateMapImmediately(routeMapId, routeCell, routeElevation, GridDirection.Right);
+        public bool ReturnToTown() => CanActivate() && transitions.TryActivateMapImmediately(returnMapId, returnCell, returnElevation, GridDirection.Down);
+
+        private bool CanActivate() => transitions != null && transitions.Player != null && transitions.Player.InputEnabled && !transitions.IsTransitioning;
 
         private void Update()
         {

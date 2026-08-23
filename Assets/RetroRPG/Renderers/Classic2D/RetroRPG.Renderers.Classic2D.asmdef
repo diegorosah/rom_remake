@@ -1,7 +1,7 @@
 {
   "name": "RetroRPG.Renderers.Classic2D",
   "rootNamespace": "RetroRPG.Renderers.Classic2D",
-  "references": ["RetroRPG.Runtime", "UnityEngine.UI"],
+  "references": ["RetroRPG.Core", "RetroRPG.Runtime", "UnityEngine.UI"],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

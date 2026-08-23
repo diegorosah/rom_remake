@@ -100,6 +100,70 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public const int EncounterTypeLand = 1;
         public const int EncounterTypeWater = 2;
 
+        // MVP 7 battle-content whitelist. These tables and record layouts are audited
+        // solely for the supported FireRed USA revision 1 fingerprint.
+        public const int PokemonSpeciesInfoTable = 0x2547F4;
+        public const int PokemonSpeciesInfoRecordSize = 0x1C;
+        public const int PokemonSpeciesInfoHitPointsOffset = 0;
+        public const int PokemonSpeciesInfoAttackOffset = 1;
+        public const int PokemonSpeciesInfoDefenseOffset = 2;
+        public const int PokemonSpeciesInfoSpeedOffset = 3;
+        public const int PokemonSpeciesInfoSpecialAttackOffset = 4;
+        public const int PokemonSpeciesInfoSpecialDefenseOffset = 5;
+        public const int PokemonSpeciesInfoPrimaryTypeOffset = 6;
+        public const int PokemonSpeciesInfoSecondaryTypeOffset = 7;
+        public const int PokemonSpeciesBulbasaur = 1;
+        public const int PokemonSpeciesPidgey = 16;
+        public const int PokemonSpeciesRattata = 19;
+        public const byte PokemonTypeNormal = 0;
+        public const byte PokemonTypeFlying = 2;
+        public const byte PokemonTypePoison = 3;
+        public const byte PokemonTypeGrass = 12;
+
+        public const int BattleMovesTable = 0x250C74;
+        public const int BattleMoveRecordSize = 12;
+        public const int BattleMoveEffectOffset = 0;
+        public const int BattleMovePowerOffset = 1;
+        public const int BattleMoveTypeOffset = 2;
+        public const int BattleMoveAccuracyOffset = 3;
+        public const int BattleMoveMaximumUsesOffset = 4;
+        public const int BattleMoveSecondaryEffectChanceOffset = 5;
+        public const int BattleMoveTargetOffset = 6;
+        public const int BattleMovePriorityOffset = 7;
+        public const int BattleMoveFlagsOffset = 8;
+        public const int BattleMoveTackle = 33;
+        public const byte BattleMoveEffectHit = 0;
+        public const byte BattleMoveTargetSelectedOpponent = 0;
+        public const byte BattleMoveTacklePower = 35;
+        public const byte BattleMoveTackleAccuracy = 95;
+        public const byte BattleMoveTackleMaximumUses = 35;
+        public const uint BattleMoveTackleFlags = 0x33u;
+
+        public const int BattleFrontSpriteSheetTable = 0x23511C;
+        public const int BattleBackSpriteSheetTable = 0x2365BC;
+        public const int BattleSpritePaletteTable = 0x23737C;
+        public const int CompressedSpriteSheetRecordSize = 8;
+        public const int CompressedSpriteSheetDataOffset = 0;
+        public const int CompressedSpriteSheetOutputSizeOffset = 4;
+        public const int CompressedSpriteSheetTagOffset = 6;
+        public const int CompressedSpritePaletteRecordSize = 8;
+        public const int CompressedSpritePaletteDataOffset = 0;
+        public const int CompressedSpritePaletteTagOffset = 4;
+        public const int BattleSpriteWidth = 64;
+        public const int BattleSpriteHeight = 64;
+        public const int BattleSprite4BppByteSize = 0x800;
+        public const int BattleSpritePaletteByteSize = 0x20;
+        public const int BattleSpritePaletteColorCount = 16;
+        public const int BulbasaurFrontSpriteData = 0xD2FBD4;
+        public const int BulbasaurBackSpriteData = 0xD2FEA0;
+        public const int BulbasaurSpritePaletteData = 0xD2FE78;
+        public const int PidgeyFrontSpriteData = 0xD39FD8;
+        public const int PidgeyBackSpriteData = 0xD3A278;
+        public const int PidgeySpritePaletteData = 0xD3A250;
+        public const int RattataFrontSpriteData = 0xD3C2AC;
+        public const int RattataBackSpriteData = 0xD3C52C;
+        public const int RattataSpritePaletteData = 0xD3C504;
+
         public const int GbaPointerBase = 0x08000000;
         public const uint ThumbPointerAddressMask = 0xFFFFFFFEu;
         public const int MapHeaderSize = 0x1C;

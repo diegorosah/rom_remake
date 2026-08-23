@@ -141,6 +141,22 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(fatManDialogue.FacePlayer, Is.True);
             Assert.That(result.DialogueCatalog.TryGetForTarget(FireRedRomLayoutRev1.RivalsHouseMapId + ":object:2", out var townMapDialogue), Is.True);
             Assert.That(townMapDialogue.FacePlayer, Is.False);
+            Assert.That(result.BattleContent, Is.Not.Null);
+            Assert.That(result.BattleContent.Creatures, Has.Count.EqualTo(3));
+            Assert.That(result.BattleContent.Skills, Has.Count.EqualTo(1));
+            Assert.That(result.BattleContent.Sprites, Has.Count.EqualTo(3));
+            Assert.That(result.BattleContent.DefaultPlayerCreatureId, Is.EqualTo("pokemon_bulbasaur"));
+            Assert.That(result.BattleContent.TryGetCreatureBySourceId(16, out var pidgey), Is.True);
+            Assert.That(pidgey.Id, Is.EqualTo("pokemon_pidgey"));
+            Assert.That(result.BattleContent.TryGetSkillBySourceId(33, out var tackle), Is.True);
+            Assert.That(tackle.Power, Is.EqualTo(35));
+            for (var spriteIndex = 0; spriteIndex < result.BattleContent.Sprites.Count; spriteIndex++)
+            {
+                var sprite = result.BattleContent.Sprites[spriteIndex];
+                Assert.That(sprite.Palette, Has.Count.EqualTo(16));
+                Assert.That(sprite.Front.Pixels, Has.Count.EqualTo(64 * 64));
+                Assert.That(sprite.Back.Pixels, Has.Count.EqualTo(64 * 64));
+            }
             Assert.That(result.Bundle.Maps, Has.Count.EqualTo(5));
             Assert.That(result.Bundle.Maps[0].Id, Is.EqualTo(FireRedRomLayoutRev1.PalletTownMapId));
 

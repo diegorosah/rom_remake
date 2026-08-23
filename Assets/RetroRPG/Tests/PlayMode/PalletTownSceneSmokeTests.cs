@@ -88,6 +88,9 @@ namespace RetroRPG.Tests.PlayMode
             var encounterSystem = Object.FindAnyObjectByType<EncounterSystem>();
             var encounterCatalog = Object.FindAnyObjectByType<RuntimeEncounterCatalog>();
             var encounterView = Object.FindAnyObjectByType<ClassicEncounterDebugView>();
+            var battleContent = Object.FindAnyObjectByType<RuntimeBattleContentCatalog>();
+            var battleCoordinator = Object.FindAnyObjectByType<BattleCoordinator>();
+            var battleView = Object.FindAnyObjectByType<ClassicBattleView>();
             var debugMaps = Object.FindAnyObjectByType<DebugMapHotkeys>();
             Assert.That(collision, Is.Not.Null);
             Assert.That(player, Is.Not.Null);
@@ -105,7 +108,10 @@ namespace RetroRPG.Tests.PlayMode
             Assert.That(dialogueView, Is.Not.Null);
             Assert.That(encounterSystem, Is.Not.Null);
             Assert.That(encounterCatalog, Is.Not.Null);
-            Assert.That(encounterView, Is.Not.Null);
+            Assert.That(encounterView, Is.Null);
+            Assert.That(battleContent, Is.Not.Null);
+            Assert.That(battleCoordinator, Is.Not.Null);
+            Assert.That(battleView, Is.Not.Null);
             Assert.That(debugMaps, Is.Not.Null);
             Assert.That(transitions.ActiveMap.Npcs, Has.Count.EqualTo(3));
             Assert.That(transitions.ActiveMap.Occupancy, Is.Not.Null);
@@ -177,7 +183,15 @@ namespace RetroRPG.Tests.PlayMode
             }
             Assert.That(encounterStepFound, Is.True, "Debug Route 1 spawn must have an adjacent encounter cell.");
             Assert.That(encounterCount, Is.EqualTo(1));
-            Assert.That(encounterView.LastMessage, Does.Contain("species:"));
+            Assert.That(battleCoordinator.IsBattleActive, Is.True);
+            Assert.That(battleView.IsVisible, Is.True);
+            Assert.That(player.InputEnabled, Is.False);
+            Assert.That(battleCoordinator.TrySubmitPrimaryAttack(), Is.True);
+            Assert.That(battleCoordinator.IsAwaitingReturn, Is.True);
+            Assert.That(battleView.IsVisible, Is.True, "outcome remains visible until the player returns");
+            battleCoordinator.ReturnToMap();
+            Assert.That(battleView.IsVisible, Is.False);
+            Assert.That(player.InputEnabled, Is.True);
             Assert.That(debugMaps.ReturnToTown(), Is.True);
             Assert.That(transitions.ActiveMap.MapId, Is.EqualTo("MAP_PALLET_TOWN"));
 

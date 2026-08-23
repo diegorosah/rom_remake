@@ -46,3 +46,24 @@ Evidence: Unity compile exit 0; full EditMode 48 total, 46 passed, 2 explicit sk
 hashes and GUIDs; PlayMode smoke `mvp2-playmode-4` 1/1, including open movement,
 blocked collision, animation, and camera quantization. The generated scene supports
 walking in the Pallet Town grid; warps, NPCs, dialogs, and battles remain out of scope.
+
+## Accelerated MVP 3–7 implementation checkpoint
+
+The generated runtime now uses a persistent `RuntimeMapCatalog` and
+`MapTransitionSystem` for Pallet Town, three interiors, and Route 1. Game-agnostic IR
+contains maps, warps, object events, dialogue tokens, encounter tables, and battle
+content; FireRed-specific pointer layouts and whitelist parsers remain isolated in the
+FireRed importer. Runtime components consume only serialized/generated Unity data.
+
+`RetroRPG.Core` owns the deterministic one-on-one `BattleState`, actions, turn order,
+HP, outcomes, and the `IBattleContentCatalog`/`IBattleView` ports. Runtime coordinates
+encounter events and overworld locks, while `Classic2D` renders the selectable battle
+panel and imported front/back sprites. The preview keeps party HP only in memory for
+the lifetime of the scene. It deliberately excludes save persistence and native
+FireRed formula details such as IVs, EVs, nature, STAB, types, random damage, status,
+PP, abilities, and executable move effects.
+
+These milestones have static review and synthetic test coverage in source. Their Unity
+compile, EditMode, explicit ROM/generation, and PlayMode evidence is intentionally
+deferred to the final integrated renderer gate; the earlier MVP 2 evidence above is the
+last executed Unity baseline.

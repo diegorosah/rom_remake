@@ -9,6 +9,7 @@
     "RetroRPG.Runtime",
     "RetroRPG.Renderers.Classic2D",
     "RetroRPG.Unity",
+    "Unity.InputSystem",
     "UnityEngine.UI",
     "Unity.RenderPipelines.Universal.2D.Runtime"
   ],

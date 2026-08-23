@@ -26,7 +26,7 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(romPath, Is.Not.Null.And.Not.Empty, TestRomEnvironmentVariable + " must point to a local ROM.");
 
             var firstResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(firstResult.Bundle, firstResult.PlayerSprite, firstResult.ObjectSprites, firstResult.DialogueCatalog, firstResult.EncounterCatalog, firstResult.Report, null);
+            PalletTownAssetBuilder.Import(firstResult.Bundle, firstResult.PlayerSprite, firstResult.ObjectSprites, firstResult.DialogueCatalog, firstResult.EncounterCatalog, firstResult.BattleContent, firstResult.Report, null);
             var first = CaptureGeneratedAssets();
             Assert.That(first.Count, Is.GreaterThan(3));
             Assert.That(ContainsPath(first, "/Player/"), Is.True);
@@ -40,7 +40,7 @@ namespace RetroRPG.Tests.EditMode
             AssertGeneratedSceneComponents();
 
             var secondResult = ParseSupportedRom(romPath);
-            PalletTownAssetBuilder.Import(secondResult.Bundle, secondResult.PlayerSprite, secondResult.ObjectSprites, secondResult.DialogueCatalog, secondResult.EncounterCatalog, secondResult.Report, null);
+            PalletTownAssetBuilder.Import(secondResult.Bundle, secondResult.PlayerSprite, secondResult.ObjectSprites, secondResult.DialogueCatalog, secondResult.EncounterCatalog, secondResult.BattleContent, secondResult.Report, null);
             var second = CaptureGeneratedAssets();
 
             CollectionAssert.AreEquivalent(first.Keys, second.Keys);
@@ -117,6 +117,9 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(catalog.GetComponent<DialogueController>(), Is.Not.Null);
             Assert.That(UnityEngine.Object.FindAnyObjectByType<InteractionSystem>(), Is.Not.Null);
             Assert.That(UnityEngine.Object.FindAnyObjectByType<ClassicDialogueView>(), Is.Not.Null);
+            Assert.That(catalog.GetComponent<RuntimeBattleContentCatalog>(), Is.Not.Null);
+            Assert.That(catalog.GetComponent<BattleCoordinator>(), Is.Not.Null);
+            Assert.That(UnityEngine.Object.FindAnyObjectByType<ClassicBattleView>(), Is.Not.Null);
             Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(scenePath));
         }
 

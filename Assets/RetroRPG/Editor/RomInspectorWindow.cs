@@ -220,7 +220,7 @@ namespace RetroRPG.Editor
                     return;
                 }
 
-                PalletTownAssetBuilder.Import(parsed.Bundle, parsed.PlayerSprite, parsed.ObjectSprites, parsed.DialogueCatalog, parsed.EncounterCatalog, parsed.Report, ShowImportProgress);
+                PalletTownAssetBuilder.Import(parsed.Bundle, parsed.PlayerSprite, parsed.ObjectSprites, parsed.DialogueCatalog, parsed.EncounterCatalog, parsed.BattleContent, parsed.Report, ShowImportProgress);
                 EditorUtility.DisplayDialog("Pallet Area importer", "Pallet Town and its MVP3 map catalog were generated successfully.", "OK");
             }
             catch (OperationCanceledException exception)

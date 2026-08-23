@@ -378,10 +378,12 @@ namespace RetroRPG.Runtime
 
         private IEncounterDebugView debugView;
         private IEncounterRandomSource random;
+        private bool isExplorationBlocked;
         private bool isSubscribed;
 
         public event Action<EncounterTrigger> EncounterTriggered;
         public IEncounterRandomSource RandomSource => random;
+        public bool IsExplorationBlocked => isExplorationBlocked;
 
         public void Configure(
             PlayerController configuredPlayer,
@@ -407,6 +409,11 @@ namespace RetroRPG.Runtime
         public void SetRandomSource(IEncounterRandomSource configuredRandom)
         {
             random = configuredRandom ?? throw new ArgumentNullException(nameof(configuredRandom));
+        }
+
+        public void SetExplorationBlocked(bool blocked)
+        {
+            isExplorationBlocked = blocked;
         }
 
         public void SetDebugViewComponent(MonoBehaviour configuredDebugViewComponent)
@@ -440,7 +447,7 @@ namespace RetroRPG.Runtime
 
         private void OnPlayerMovementCompleted(PlayerController movingPlayer)
         {
-            if (movingPlayer != player || player == null || encounterCatalog == null || random == null ||
+            if (isExplorationBlocked || movingPlayer != player || player == null || encounterCatalog == null || random == null ||
                 (mapTransitions != null && mapTransitions.IsTransitioning) ||
                 (dialogueController != null && dialogueController.IsOpen))
             {
