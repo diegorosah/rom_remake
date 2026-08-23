@@ -1,0 +1,15 @@
+{
+  "name": "RetroRPG.Importers.GBA.PokemonFireRed",
+  "rootNamespace": "RetroRPG.Importers.GBA.PokemonFireRed",
+  "references": ["RetroRPG.Core", "RetroRPG.IR", "RetroRPG.Importers.GBA.Common"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}
+

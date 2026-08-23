@@ -1,0 +1,22 @@
+{
+  "name": "RetroRPG.Editor",
+  "rootNamespace": "RetroRPG.Editor",
+  "references": [
+    "RetroRPG.Core",
+    "RetroRPG.IR",
+    "RetroRPG.Importers.GBA.Common",
+    "RetroRPG.Importers.GBA.PokemonFireRed",
+    "RetroRPG.Unity",
+    "Unity.2D.Tilemap.Extras",
+    "Unity.RenderPipelines.Universal.2D.Runtime"
+  ],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

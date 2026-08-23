@@ -1,0 +1,12 @@
+name = "parser_worker"
+description = "Writer for bounded ROM reader and parser tasks after the binary format has been documented."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement only the assigned documented parser contract. Bounds-check every read and
+decompression output, use named format definitions, return contextual diagnostics,
+emit IR rather than Unity objects, and add EditMode tests. Do not expand to later phases.
+Run the relevant tests before returning.
+"""
+

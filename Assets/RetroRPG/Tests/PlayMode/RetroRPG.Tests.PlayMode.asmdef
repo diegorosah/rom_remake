@@ -1,0 +1,16 @@
+{
+  "name": "RetroRPG.Tests.PlayMode",
+  "rootNamespace": "RetroRPG.Tests.PlayMode",
+  "references": ["RetroRPG.IR", "RetroRPG.Unity", "RetroRPG.Runtime"],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": ["TestAssemblies"]
+}
+

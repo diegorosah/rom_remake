@@ -1,0 +1,42 @@
+# User-owned ROMs and extracted proprietary content
+/POKEMON_FIRERED_ROM/
+/Assets/Imported/
+/LocalRoms/
+*.gba
+*.nds
+
+# Unity generated state
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/UserSettings/
+/MemoryCaptures/
+/Recordings/
+
+# IDE and local tooling
+/.vs/
+/.vscode/
+/.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.opendb
+*.VC.db
+
+# Test and crash output
+/TestResults/
+sysinfo.txt
+crashlytics-build.properties
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
