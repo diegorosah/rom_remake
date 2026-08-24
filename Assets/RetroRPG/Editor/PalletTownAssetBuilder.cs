@@ -32,6 +32,18 @@ namespace RetroRPG.Editor
         private const float PixelTicksPerSecond = 60f;
         private static readonly Vector2Int PlayerSpawnCell = new Vector2Int(6, 6);
 
+        private readonly struct PreviewSpawn
+        {
+            public PreviewSpawn(Vector2Int cell, byte elevation)
+            {
+                Cell = cell;
+                Elevation = elevation;
+            }
+
+            public Vector2Int Cell { get; }
+            public byte Elevation { get; }
+        }
+
         [Serializable]
         private sealed class ImportManifest
         {
@@ -189,7 +201,6 @@ namespace RetroRPG.Editor
                 throw new InvalidOperationException("Map bundle contains no maps.");
             }
 
-            var foundPalletTown = false;
             for (var mapIndex = 0; mapIndex < bundle.Maps.Count; mapIndex++)
             {
                 var map = bundle.Maps[mapIndex];
@@ -198,7 +209,6 @@ namespace RetroRPG.Editor
                 {
                     Validate(map);
                     ValidatePlayerSpawn(map);
-                    foundPalletTown = true;
                 }
 
                 for (var warpIndex = 0; warpIndex < map.Warps.Count; warpIndex++)
@@ -211,11 +221,6 @@ namespace RetroRPG.Editor
                         throw new InvalidOperationException("Map bundle contains an invalid warp.");
                     }
                 }
-            }
-
-            if (!foundPalletTown)
-            {
-                throw new InvalidOperationException("MVP3 map bundle must include MAP_PALLET_TOWN.");
             }
 
             ValidatePlayerSprite(playerSprite);
@@ -487,7 +492,7 @@ namespace RetroRPG.Editor
                 {
                     contexts[contextIndex].WriteTexturesAndTiles(owned, shouldCancel);
                 }
-                FindPalletTownContext(contexts).WritePlayerSprites(owned);
+                FindEntryContext(contexts).WritePlayerSprites(owned);
                 var objectAssets = objectSprites == null ? null : ObjectEventAssetBuilder.WriteAssets(objectSprites, owned);
                 var battleSprites = battleContent == null ? null : WriteBattleSprites(battleContent, owned);
                 CreateScene(contexts, objectAssets, dialogueCatalog, encounterCatalog, battleContent, battleSprites, owned);
@@ -559,11 +564,20 @@ namespace RetroRPG.Editor
                 ? EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single)
                 : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
+            // Generated scenes may outlive a script-layout refactor. Unity keeps those
+            // stale MonoBehaviours as Missing/Unknown components, and a later
+            // GetOrAddComponent<T>() cannot repair them because there is no live T to
+            // find. Remove them before rebuilding the deterministic scene graph.
+            RemoveMissingMonoBehaviours(scene);
+
             var mapsObject = FindRootObjectOrNull(scene, "Maps") ?? new GameObject("Maps");
             MigrateLegacyPalletTownRoot(scene, mapsObject.transform);
+            RemoveObsoleteGeneratedMapRoots(mapsObject.transform, contexts);
+            var entryContext = FindEntryContext(contexts);
+            var entrySpawn = FindPreviewSpawn(entryContext.Map);
             var mapRoots = new List<MapRuntimeRoot>(contexts.Count);
             var mapInteractionCatalogs = new List<MapInteractionCatalog>(contexts.Count);
-            MapRuntimeRoot palletTownRoot = null;
+            MapRuntimeRoot entryMapRoot = null;
             for (var contextIndex = 0; contextIndex < contexts.Count; contextIndex++)
             {
                 var context = contexts[contextIndex];
@@ -588,12 +602,13 @@ namespace RetroRPG.Editor
                 occupancy.Configure(collisionMap);
 
                 var runtimeWarps = CreateRuntimeWarps(context.Map);
+                var runtimeConnections = CreateRuntimeConnections(context.Map);
                 var mapObjects = objectAssets == null
                     ? null
                     : ObjectEventAssetBuilder.CreateMapObjects(context.Map, root.transform, collisionMap, occupancy, objectAssets);
                 var runtimeNpcs = mapObjects == null ? new List<NpcController>() : mapObjects.Npcs;
                 var mapRoot = GetOrAddComponent<MapRuntimeRoot>(root);
-                mapRoot.Configure(context.Map.Id, collisionMap, runtimeWarps, occupancy, runtimeNpcs);
+                mapRoot.Configure(context.Map.Id, collisionMap, runtimeWarps, runtimeConnections, occupancy, runtimeNpcs);
                 var npcSimulation = GetOrAddComponent<NpcSimulationDriver>(root);
                 npcSimulation.Configure(mapRoot);
                 var mapInteractions = GetOrAddComponent<MapInteractionCatalog>(root);
@@ -602,10 +617,10 @@ namespace RetroRPG.Editor
                     mapObjects == null ? new List<MonoBehaviour>() : mapObjects.InteractionTargets);
                 mapInteractionCatalogs.Add(mapInteractions);
                 mapRoots.Add(mapRoot);
-                if (string.Equals(context.Map.Id, "MAP_PALLET_TOWN", StringComparison.Ordinal)) palletTownRoot = mapRoot;
+                if (string.Equals(context.Map.Id, entryContext.Map.Id, StringComparison.Ordinal)) entryMapRoot = mapRoot;
             }
 
-            if (palletTownRoot == null) throw new InvalidOperationException("The generated map catalog is missing Pallet Town.");
+            if (entryMapRoot == null) throw new InvalidOperationException("The generated map catalog is missing its deterministic entry map.");
 
             // Player and camera deliberately remain sibling roots: map roots can be
             // deactivated during a transition without disabling either one.
@@ -614,13 +629,13 @@ namespace RetroRPG.Editor
             playerRenderer.sortingLayerName = "Default";
             playerRenderer.sortingOrder = 2;
             var playerAnimator = GetOrAddComponent<DirectionalSpriteAnimator>(playerObject);
-            var playerContext = FindPalletTownContext(contexts);
+            var playerContext = entryContext;
             playerAnimator.Configure(
                 playerRenderer,
                 playerContext.CreatePlayerSequences(SpriteAnimationState.Idle),
                 playerContext.CreatePlayerSequences(SpriteAnimationState.Walking));
             var playerController = GetOrAddComponent<PlayerController>(playerObject);
-            playerController.Configure(palletTownRoot.CollisionMap, PlayerSpawnCell, 3, 4f, palletTownRoot.Occupancy);
+            playerController.Configure(entryMapRoot.CollisionMap, entrySpawn.Cell, entrySpawn.Elevation, 4f, entryMapRoot.Occupancy);
             playerController.InputEnabled = true;
 
             var cameraObject = FindRootObjectOrNull(scene, "Main Camera") ?? new GameObject("Main Camera", typeof(Camera), typeof(PixelPerfectCamera));
@@ -629,13 +644,13 @@ namespace RetroRPG.Editor
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = Color.black;
             camera.tag = "MainCamera";
-            camera.transform.position = new Vector3(palletTownRoot.CollisionMap.Width * 0.5f, palletTownRoot.CollisionMap.Height * 0.5f, -10f);
+            camera.transform.position = new Vector3(entryMapRoot.CollisionMap.Width * 0.5f, entryMapRoot.CollisionMap.Height * 0.5f, -10f);
             var pixelPerfect = GetOrAddComponent<PixelPerfectCamera>(cameraObject);
             pixelPerfect.assetsPPU = 16;
             pixelPerfect.refResolutionX = 240;
             pixelPerfect.refResolutionY = 160;
             var follow = GetOrAddComponent<PixelPerfectCameraFollow>(cameraObject);
-            follow.ConfigureForMap(camera, playerObject.transform, palletTownRoot.CollisionMap);
+            follow.ConfigureForMap(camera, playerObject.transform, entryMapRoot.CollisionMap);
 
             var eventSystemObject = FindRootObjectOrNull(scene, "Event System") ?? new GameObject("Event System");
             GetOrAddComponent<EventSystem>(eventSystemObject);
@@ -645,7 +660,7 @@ namespace RetroRPG.Editor
             var catalog = GetOrAddComponent<RuntimeMapCatalog>(runtimeObject);
             catalog.Configure(mapRoots);
             var transitions = GetOrAddComponent<MapTransitionSystem>(runtimeObject);
-            transitions.Configure(catalog, playerController, follow, palletTownRoot);
+            transitions.Configure(catalog, playerController, follow, entryMapRoot);
             var runtimeInteractions = GetOrAddComponent<RuntimeInteractionCatalog>(runtimeObject);
             runtimeInteractions.Configure(mapInteractionCatalogs);
             var runtimeDialogues = GetOrAddComponent<RetroRPG.Runtime.DialogueCatalog>(runtimeObject);
@@ -688,9 +703,9 @@ namespace RetroRPG.Editor
                     routeCell.MapId,
                     routeCell.Cell,
                     routeCell.Elevation,
-                    palletTownRoot.MapId,
-                    PlayerSpawnCell,
-                    3);
+                    entryMapRoot.MapId,
+                    entrySpawn.Cell,
+                    entrySpawn.Elevation);
             }
             follow.ApplyFollow();
 
@@ -1178,6 +1193,33 @@ namespace RetroRPG.Editor
             return result;
         }
 
+        private static List<MapRuntimeConnection> CreateRuntimeConnections(MapDefinition map)
+        {
+            var result = new List<MapRuntimeConnection>(map.Connections.Count);
+            for (var index = 0; index < map.Connections.Count; index++)
+            {
+                var source = map.Connections[index];
+                result.Add(new MapRuntimeConnection(
+                    ToRuntimeConnectionDirection(source.Direction),
+                    source.Offset,
+                    source.DestinationMapId));
+            }
+
+            return result;
+        }
+
+        private static MapRuntimeConnectionDirection ToRuntimeConnectionDirection(RetroRPG.IR.MapConnectionDirection source)
+        {
+            switch (source)
+            {
+                case RetroRPG.IR.MapConnectionDirection.South: return MapRuntimeConnectionDirection.South;
+                case RetroRPG.IR.MapConnectionDirection.North: return MapRuntimeConnectionDirection.North;
+                case RetroRPG.IR.MapConnectionDirection.West: return MapRuntimeConnectionDirection.West;
+                case RetroRPG.IR.MapConnectionDirection.East: return MapRuntimeConnectionDirection.East;
+                default: throw new InvalidOperationException("Map connection direction is not cardinal.");
+            }
+        }
+
         private static void GetRuntimeWarpActivation(WarpActivation source, out MapRuntimeWarpActivation activation, out GridDirection direction)
         {
             switch (source)
@@ -1224,6 +1266,25 @@ namespace RetroRPG.Editor
                 legacy.transform.SetParent(mapsParent, false);
                 legacy.name = "MAP_PALLET_TOWN";
             }
+        }
+
+        /// <summary>Selection imports own only canonical generated map roots; unrelated scene children are preserved.</summary>
+        private static void RemoveObsoleteGeneratedMapRoots(Transform mapsParent, IList<BuildContext> contexts)
+        {
+            var expected = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < contexts.Count; index++) expected.Add(contexts[index].Map.Id);
+
+            var obsolete = new List<GameObject>();
+            for (var index = 0; index < mapsParent.childCount; index++)
+            {
+                var child = mapsParent.GetChild(index);
+                if (child.name.StartsWith("MAP_", StringComparison.Ordinal) && !expected.Contains(child.name))
+                {
+                    obsolete.Add(child.gameObject);
+                }
+            }
+
+            for (var index = 0; index < obsolete.Count; index++) UnityEngine.Object.DestroyImmediate(obsolete[index]);
         }
 
         private static GameObject FindRootObject(Scene scene, string name)
@@ -1305,6 +1366,27 @@ namespace RetroRPG.Editor
             return component != null ? component : gameObject.AddComponent<T>();
         }
 
+        private static void RemoveMissingMonoBehaviours(Scene scene)
+        {
+            if (!scene.IsValid()) return;
+
+            var roots = scene.GetRootGameObjects();
+            for (var rootIndex = 0; rootIndex < roots.Length; rootIndex++)
+            {
+                RemoveMissingMonoBehavioursRecursive(roots[rootIndex].transform);
+            }
+        }
+
+        private static void RemoveMissingMonoBehavioursRecursive(Transform transform)
+        {
+            if (transform == null) return;
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(transform.gameObject);
+            for (var childIndex = 0; childIndex < transform.childCount; childIndex++)
+            {
+                RemoveMissingMonoBehavioursRecursive(transform.GetChild(childIndex));
+            }
+        }
+
         private static ImportManifest LoadManifest()
         {
             var absolute = ToAbsolutePath(ManifestPath);
@@ -1352,14 +1434,38 @@ namespace RetroRPG.Editor
             return result;
         }
 
-        private static BuildContext FindPalletTownContext(IList<BuildContext> contexts)
+        /// <summary>Uses Pallet Town when present to preserve the existing vertical-slice entry point; otherwise uses the sorted bundle's first map.</summary>
+        private static BuildContext FindEntryContext(IList<BuildContext> contexts)
         {
             for (var i = 0; i < contexts.Count; i++)
             {
                 if (string.Equals(contexts[i].Map.Id, "MAP_PALLET_TOWN", StringComparison.Ordinal)) return contexts[i];
             }
 
-            throw new InvalidOperationException("MVP3 context set is missing MAP_PALLET_TOWN.");
+            if (contexts.Count == 0) throw new InvalidOperationException("The generated map catalog has no entry map.");
+            return contexts[0];
+        }
+
+        private static PreviewSpawn FindPreviewSpawn(MapDefinition map)
+        {
+            if (map == null) throw new ArgumentNullException(nameof(map));
+            if (string.Equals(map.Id, "MAP_PALLET_TOWN", StringComparison.Ordinal)) return new PreviewSpawn(PlayerSpawnCell, 3);
+
+            // IR cell coordinates are top-down; GridCollisionMap is configured bottom-up.
+            // The first traversable source cell is a stable preview spawn for an isolated map.
+            for (var sourceY = 0; sourceY < map.Height; sourceY++)
+            {
+                for (var sourceX = 0; sourceX < map.Width; sourceX++)
+                {
+                    var cell = map.Cells[(sourceY * map.Width) + sourceX];
+                    if (cell.Collision == 0)
+                    {
+                        return new PreviewSpawn(new Vector2Int(sourceX, map.Height - 1 - sourceY), checked((byte)cell.Elevation));
+                    }
+                }
+            }
+
+            throw new InvalidOperationException("Map " + map.Id + " has no walkable cell for a preview spawn.");
         }
 
         private static string GetMapOutputRoot(MapDefinition map)
@@ -1742,15 +1848,17 @@ namespace RetroRPG.Editor
                     {
                         var sourceX = key.HorizontalFlip ? IndexedTileDefinition.Width - 1 - x : x;
                         var sourceY = key.VerticalFlip ? IndexedTileDefinition.Height - 1 - y : y;
-                        var paletteEntry = palette.Colors[(sourceY * IndexedTileDefinition.Width) + sourceX < tile.Pixels.Count
-                            ? tile.Pixels[(sourceY * IndexedTileDefinition.Width) + sourceX]
-                            : (byte)0];
-                        // Texture coordinates begin at the bottom; source GBA pixels begin at the top.
+                        var sourceIndex = (sourceY * IndexedTileDefinition.Width) + sourceX;
+                        var paletteIndex = sourceIndex < tile.Pixels.Count ? tile.Pixels[sourceIndex] : (byte)0;
+                        var paletteEntry = palette.Colors[paletteIndex];
+                        // In GBA 4bpp BG tiles palette index zero is transparent over lower
+                        // background layers. Keeping it opaque produced black rectangles on
+                        // layered indoor objects such as Oak's lab equipment.
                         colors[((IndexedTileDefinition.Height - 1 - y) * IndexedTileDefinition.Width) + x] = new Color32(
                             paletteEntry.Red,
                             paletteEntry.Green,
                             paletteEntry.Blue,
-                            paletteEntry.Alpha);
+                            paletteIndex == 0 ? (byte)0 : paletteEntry.Alpha);
                     }
                 }
                 var texture = new Texture2D(IndexedTileDefinition.Width, IndexedTileDefinition.Height, TextureFormat.RGBA32, false, true);
@@ -1929,6 +2037,18 @@ namespace RetroRPG.Editor
                     AppendString(builder, warp.Activation.ToString());
                     builder.Append(",\"destinationFacing\":");
                     AppendString(builder, warp.DestinationFacing.ToString());
+                    builder.Append('}');
+                }
+
+                builder.Append("],\"connections\":[");
+                for (var connectionIndex = 0; connectionIndex < map.Connections.Count; connectionIndex++)
+                {
+                    var connection = map.Connections[connectionIndex];
+                    builder.Append(connectionIndex == 0 ? string.Empty : ",").Append("{\"direction\":");
+                    AppendString(builder, connection.Direction.ToString());
+                    builder.Append(",\"offset\":").Append(connection.Offset)
+                        .Append(",\"destinationMapId\":");
+                    AppendString(builder, connection.DestinationMapId);
                     builder.Append('}');
                 }
 

@@ -220,7 +220,25 @@ namespace RetroRPG.Editor
                     return;
                 }
 
-                PalletTownAssetBuilder.Import(parsed.Bundle, parsed.PlayerSprite, parsed.ObjectSprites, parsed.DialogueCatalog, parsed.EncounterCatalog, parsed.BattleContent, parsed.Report, ShowImportProgress);
+                var selectedMapIds = new List<string>(parsed.Bundle.Maps.Count);
+                for (var mapIndex = 0; mapIndex < parsed.Bundle.Maps.Count; mapIndex++)
+                {
+                    selectedMapIds.Add(parsed.Bundle.Maps[mapIndex].Id);
+                }
+
+                MapAssetBuilder.Import(
+                    new MapAssetImportRequest(
+                        new MapAssetImportSnapshot(
+                            parsed.Bundle,
+                            parsed.PlayerSprite,
+                            parsed.ObjectSprites,
+                            parsed.DialogueCatalog,
+                            parsed.EncounterCatalog,
+                            parsed.BattleContent,
+                            parsed.Report,
+                            parsed.MapCatalog),
+                        selectedMapIds),
+                    ShowImportProgress);
                 EditorUtility.DisplayDialog("Pallet Area importer", "Pallet Town and its MVP3 map catalog were generated successfully.", "OK");
             }
             catch (OperationCanceledException exception)

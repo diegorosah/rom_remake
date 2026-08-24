@@ -271,7 +271,13 @@ namespace RetroRPG.IR
             for (var index = 0; index < skills.Count; index++)
             {
                 var skill = skills[index] ?? throw new ArgumentException("Skills cannot contain null.", nameof(skills));
-                if (!skillsById.Add(skill.Id, skill) || !skillsBySourceId.Add(skill.SourceId, skill)) throw new ArgumentException("Skill ids and source ids must be unique.", nameof(skills));
+                if (skillsById.ContainsKey(skill.Id) || skillsBySourceId.ContainsKey(skill.SourceId))
+                {
+                    throw new ArgumentException("Skill ids and source ids must be unique.", nameof(skills));
+                }
+
+                skillsById.Add(skill.Id, skill);
+                skillsBySourceId.Add(skill.SourceId, skill);
                 copied.Add(skill);
             }
 
@@ -286,7 +292,13 @@ namespace RetroRPG.IR
             for (var index = 0; index < sprites.Count; index++)
             {
                 var sprite = sprites[index] ?? throw new ArgumentException("Sprites cannot contain null.", nameof(sprites));
-                if (!spritesById.Add(sprite.Id, sprite) || !creatureIds.Add(sprite.CreatureId)) throw new ArgumentException("Sprite ids and sprite creature ids must be unique.", nameof(sprites));
+                if (spritesById.ContainsKey(sprite.Id) || creatureIds.Contains(sprite.CreatureId))
+                {
+                    throw new ArgumentException("Sprite ids and sprite creature ids must be unique.", nameof(sprites));
+                }
+
+                spritesById.Add(sprite.Id, sprite);
+                creatureIds.Add(sprite.CreatureId);
                 copied.Add(sprite);
             }
 
@@ -300,7 +312,13 @@ namespace RetroRPG.IR
             for (var index = 0; index < creatures.Count; index++)
             {
                 var creature = creatures[index] ?? throw new ArgumentException("Creatures cannot contain null.", nameof(creatures));
-                if (!creaturesById.Add(creature.Id, creature) || !creaturesBySourceId.Add(creature.SourceId, creature)) throw new ArgumentException("Creature ids and source ids must be unique.", nameof(creatures));
+                if (creaturesById.ContainsKey(creature.Id) || creaturesBySourceId.ContainsKey(creature.SourceId))
+                {
+                    throw new ArgumentException("Creature ids and source ids must be unique.", nameof(creatures));
+                }
+
+                creaturesById.Add(creature.Id, creature);
+                creaturesBySourceId.Add(creature.SourceId, creature);
                 copied.Add(creature);
             }
 

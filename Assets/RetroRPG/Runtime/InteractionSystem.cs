@@ -17,9 +17,13 @@ namespace RetroRPG.Runtime
         [SerializeField] private RuntimeInteractionCatalog interactionCatalog;
         [SerializeField] private DialogueController dialogueController;
         [SerializeField] private bool readInteractionInput = true;
+        [SerializeField] private bool logInteractionDiagnostics = true;
+
+        private string lastDiagnostic;
 
         public PlayerController Player => player;
         public DialogueController DialogueController => dialogueController;
+        public string LastDiagnostic => lastDiagnostic;
 
         public void Configure(
             PlayerController configuredPlayer,
@@ -38,24 +42,74 @@ namespace RetroRPG.Runtime
         /// <summary>Attempts interaction on the cardinal cell immediately in front of the player.</summary>
         public bool TryInteract()
         {
-            if (player == null || !player.InputEnabled || player.IsMoving || dialogueController == null || dialogueController.IsOpen ||
-                (mapTransitions != null && mapTransitions.IsTransitioning) ||
-                interactionCatalog == null || !GridDirections.IsCardinal(player.Facing))
+            lastDiagnostic = null;
+            if (player == null)
             {
-                return false;
+                return Fail("PlayerController is not configured.");
+            }
+            if (!player.InputEnabled)
+            {
+                return Fail("Player input is disabled.");
+            }
+            if (player.IsMoving)
+            {
+                return Fail("Player is still moving.");
+            }
+            if (dialogueController == null)
+            {
+                return Fail("DialogueController is not configured.");
+            }
+            if (dialogueController.IsOpen)
+            {
+                return Fail("A dialogue is already open.");
+            }
+            if (mapTransitions != null && mapTransitions.IsTransitioning)
+            {
+                return Fail("A map transition is in progress.");
+            }
+            if (interactionCatalog == null)
+            {
+                return Fail("RuntimeInteractionCatalog is not configured.");
+            }
+            if (!GridDirections.IsCardinal(player.Facing))
+            {
+                return Fail("Player facing is not cardinal.");
             }
 
             MapRuntimeRoot activeMap = ResolveActiveMap();
-            if (activeMap == null || !activeMap.IsRuntimeActive || !interactionCatalog.TryResolve(activeMap, out MapInteractionCatalog targets))
+            if (activeMap == null)
             {
-                return false;
+                return Fail("No active runtime map could be resolved.");
+            }
+            if (!activeMap.IsRuntimeActive)
+            {
+                return Fail("Resolved map is not runtime-active: " + activeMap.MapId + ".");
+            }
+            if (!interactionCatalog.TryResolve(activeMap, out MapInteractionCatalog targets) || targets == null)
+            {
+                return Fail("No interaction catalog is registered for active map " + activeMap.MapId + ".");
             }
 
             Vector2Int targetCell = player.CurrentCell + GridDirections.ToOffset(player.Facing);
-            if (!targets.TryFindAt(targetCell, player.Elevation, out IInteractionTarget target) ||
-                !dialogueController.TryOpen(target.InteractionKey, activeMap))
+            bool usedElevationFallback = false;
+            if (!targets.TryFindAt(targetCell, player.Elevation, out IInteractionTarget target))
             {
-                return false;
+                if (!targets.TryFindAtAnyElevation(targetCell, out target))
+                {
+                    return Fail(
+                        "No interaction target at " + targetCell + " in map " + activeMap.MapId +
+                        " (player=" + player.CurrentCell + ", facing=" + player.Facing +
+                        ", elevation=" + player.Elevation + ", registeredTargets=" + targets.Targets.Count + ").");
+                }
+
+                usedElevationFallback = true;
+            }
+
+            if (!dialogueController.TryOpen(target.InteractionKey, activeMap))
+            {
+                return Fail(
+                    "Target " + target.InteractionKey + " was found at " + targetCell +
+                    " but dialogue did not open: " + dialogueController.LastFailure);
             }
 
             if (dialogueController.Session != null && dialogueController.Session.Definition.FaceTarget &&
@@ -64,7 +118,30 @@ namespace RetroRPG.Runtime
                 facingTarget.FaceInteractor(player.Facing);
             }
 
+            lastDiagnostic =
+                "[INTERACT] opened key=" + target.InteractionKey +
+                " map=" + activeMap.MapId +
+                " player=" + player.CurrentCell +
+                " target=" + targetCell +
+                " facing=" + player.Facing +
+                " elevation=" + player.Elevation +
+                (usedElevationFallback ? " elevationFallback=true" : string.Empty);
+            if (logInteractionDiagnostics)
+            {
+                Debug.Log(lastDiagnostic, this);
+            }
+
             return true;
+        }
+
+        private bool Fail(string reason)
+        {
+            lastDiagnostic = "[INTERACT] " + reason;
+            if (logInteractionDiagnostics)
+            {
+                Debug.LogWarning(lastDiagnostic, this);
+            }
+            return false;
         }
 
         private void Update()
@@ -75,7 +152,12 @@ namespace RetroRPG.Runtime
             }
 
             Keyboard keyboard = Keyboard.current;
-            if (keyboard != null && (keyboard.zKey.wasPressedThisFrame || keyboard.xKey.wasPressedThisFrame || keyboard.eKey.wasPressedThisFrame))
+            if (keyboard != null &&
+                (keyboard.zKey.wasPressedThisFrame ||
+                 keyboard.xKey.wasPressedThisFrame ||
+                 keyboard.eKey.wasPressedThisFrame ||
+                 keyboard.spaceKey.wasPressedThisFrame ||
+                 keyboard.enterKey.wasPressedThisFrame))
             {
                 TryInteract();
             }

@@ -141,13 +141,15 @@ namespace RetroRPG.IR
             for (var i = 0; i < zones.Count; i++)
             {
                 var zone = zones[i] ?? throw new ArgumentException("Encounter zones cannot contain null.", nameof(zones));
-                if (!zonesById.Add(zone.Id, zone)) throw new ArgumentException("Encounter zone ids must be unique.", nameof(zones));
+                if (zonesById.ContainsKey(zone.Id)) throw new ArgumentException("Encounter zone ids must be unique.", nameof(zones));
+                zonesById.Add(zone.Id, zone);
                 copiedZones.Add(zone);
             }
             for (var i = 0; i < tables.Count; i++)
             {
                 var table = tables[i] ?? throw new ArgumentException("Encounter tables cannot contain null.", nameof(tables));
-                if (!tablesById.Add(table.Id, table)) throw new ArgumentException("Encounter table ids must be unique.", nameof(tables));
+                if (tablesById.ContainsKey(table.Id)) throw new ArgumentException("Encounter table ids must be unique.", nameof(tables));
+                tablesById.Add(table.Id, table);
                 copiedTables.Add(table);
             }
 

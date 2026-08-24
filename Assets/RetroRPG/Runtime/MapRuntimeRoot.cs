@@ -11,6 +11,7 @@ namespace RetroRPG.Runtime
         [SerializeField] private GridCollisionMap collisionMap;
         [SerializeField] private MapCellOccupancy occupancy;
         [SerializeField] private List<MapRuntimeWarp> warps = new List<MapRuntimeWarp>();
+        [SerializeField] private List<MapRuntimeConnection> connections = new List<MapRuntimeConnection>();
         [SerializeField] private List<NpcController> npcs = new List<NpcController>();
         [SerializeField] private NpcSimulationDriver npcSimulationDriver;
         [SerializeField] private bool isRuntimeActive = true;
@@ -20,19 +21,31 @@ namespace RetroRPG.Runtime
         public GridCollisionMap CollisionMap => collisionMap;
         public MapCellOccupancy Occupancy => occupancy;
         public IReadOnlyList<MapRuntimeWarp> Warps => warps;
+        public IReadOnlyList<MapRuntimeConnection> Connections => connections;
         public IReadOnlyList<NpcController> Npcs => npcs;
         public NpcSimulationDriver NpcSimulationDriver => npcSimulationDriver;
         public bool IsRuntimeActive => isRuntimeActive;
 
         public void Configure(string configuredMapId, GridCollisionMap configuredCollisionMap, IList<MapRuntimeWarp> configuredWarps)
         {
-            Configure(configuredMapId, configuredCollisionMap, configuredWarps, null, null);
+            Configure(configuredMapId, configuredCollisionMap, configuredWarps, null, null, null);
         }
 
         public void Configure(
             string configuredMapId,
             GridCollisionMap configuredCollisionMap,
             IList<MapRuntimeWarp> configuredWarps,
+            MapCellOccupancy configuredOccupancy,
+            IList<NpcController> configuredNpcs)
+        {
+            Configure(configuredMapId, configuredCollisionMap, configuredWarps, null, configuredOccupancy, configuredNpcs);
+        }
+
+        public void Configure(
+            string configuredMapId,
+            GridCollisionMap configuredCollisionMap,
+            IList<MapRuntimeWarp> configuredWarps,
+            IList<MapRuntimeConnection> configuredConnections,
             MapCellOccupancy configuredOccupancy,
             IList<NpcController> configuredNpcs)
         {
@@ -61,8 +74,10 @@ namespace RetroRPG.Runtime
                 }
             }
             warps = configuredWarps == null ? new List<MapRuntimeWarp>() : new List<MapRuntimeWarp>(configuredWarps);
+            connections = configuredConnections == null ? new List<MapRuntimeConnection>() : new List<MapRuntimeConnection>(configuredConnections);
             npcs = configuredNpcs == null ? new List<NpcController>() : new List<NpcController>(configuredNpcs);
             ValidateWarps();
+            ValidateConnections();
             ValidateNpcs();
         }
 
@@ -204,6 +219,11 @@ namespace RetroRPG.Runtime
                 warps = new List<MapRuntimeWarp>();
             }
 
+            if (connections == null)
+            {
+                connections = new List<MapRuntimeConnection>();
+            }
+
             if (npcs == null)
             {
                 npcs = new List<NpcController>();
@@ -227,6 +247,33 @@ namespace RetroRPG.Runtime
                     throw new ArgumentException(
                         "Each map warp must be non-null, valid, in bounds, and have a unique ID.",
                         nameof(warps));
+                }
+            }
+        }
+
+        private void ValidateConnections()
+        {
+            if (connections == null)
+            {
+                connections = new List<MapRuntimeConnection>();
+                return;
+            }
+
+            var known = new HashSet<string>(StringComparer.Ordinal);
+            for (int index = 0; index < connections.Count; index++)
+            {
+                MapRuntimeConnection connection = connections[index];
+                if (connection == null || string.IsNullOrWhiteSpace(connection.DestinationMapId))
+                {
+                    throw new ArgumentException("Map connections must be non-null and have destination ids.", nameof(connections));
+                }
+
+                var key = ((int)connection.Direction).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + connection.Offset.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + connection.DestinationMapId;
+                if (!known.Add(key))
+                {
+                    throw new ArgumentException("Duplicate runtime map connections are not allowed.", nameof(connections));
                 }
             }
         }

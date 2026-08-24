@@ -21,7 +21,8 @@ namespace RetroRPG.IR
         public DialogueToken(DialogueTokenKind kind, string value = null, int[] parameters = null)
         {
             if (kind != DialogueTokenKind.Glyph && kind != DialogueTokenKind.Placeholder && kind != DialogueTokenKind.ExtendedControl && !string.IsNullOrEmpty(value)) throw new ArgumentException("Only value-bearing dialogue tokens may have text.", nameof(value));
-            if ((kind == DialogueTokenKind.Glyph || kind == DialogueTokenKind.Placeholder || kind == DialogueTokenKind.ExtendedControl) && string.IsNullOrWhiteSpace(value)) throw new ArgumentException("A semantic dialogue token value is required.", nameof(value));
+            if (kind == DialogueTokenKind.Glyph && string.IsNullOrEmpty(value)) throw new ArgumentException("A glyph dialogue token value is required.", nameof(value));
+            if ((kind == DialogueTokenKind.Placeholder || kind == DialogueTokenKind.ExtendedControl) && string.IsNullOrWhiteSpace(value)) throw new ArgumentException("A semantic dialogue token value is required.", nameof(value));
             Kind = kind; Value = value; Parameters = new ReadOnlyCollection<int>(new List<int>(parameters ?? new int[0]));
         }
 

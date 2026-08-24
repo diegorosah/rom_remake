@@ -17,6 +17,7 @@ namespace RetroRPG.Runtime
         [SerializeField] private MapRuntimeRoot activeMap;
         [SerializeField] private CanvasGroup fadeCanvasGroup;
         [SerializeField, Min(0f)] private float fadeDuration;
+        [SerializeField] private bool logConnectionDiagnostics = true;
 
         private bool isTransitioning;
         private bool suppressArrivalWarp;
@@ -129,34 +130,190 @@ namespace RetroRPG.Runtime
                 return false;
             }
 
-            if (!activeMap.TryGetActivatedWarp(movingPlayer.CurrentCell, direction, out MapRuntimeWarp sourceWarp))
+            if (activeMap.TryGetActivatedWarp(movingPlayer.CurrentCell, direction, out MapRuntimeWarp sourceWarp))
             {
-                return false;
-            }
+                if (IsArrivalWarpSuppressed(activeMap, sourceWarp))
+                {
+                    // Suppression disables the warp, not the movement request. Let the
+                    // ordinary collision path move the player away and clear suppression.
+                    lastFailure = null;
+                    return false;
+                }
 
-            if (IsArrivalWarpSuppressed(activeMap, sourceWarp))
-            {
-                // Suppression disables the warp, not the movement request. Let the
-                // ordinary collision path move the player away and clear suppression.
-                lastFailure = null;
-                return false;
-            }
+                if (!TryPrepareTransition(sourceWarp, out TransitionRequest request))
+                {
+                    return true;
+                }
 
-            if (!TryPrepareTransition(sourceWarp, out TransitionRequest request))
-            {
+                if (fadeCanvasGroup == null || fadeDuration <= 0f)
+                {
+                    ApplyTransition(request);
+                }
+                else
+                {
+                    StartCoroutine(FadeAndApplyTransition(request));
+                }
+
                 return true;
             }
 
-            if (fadeCanvasGroup == null || fadeDuration <= 0f)
+            return TryInterceptMapConnection(movingPlayer, direction);
+        }
+
+        /// <summary>
+        /// Follows a cardinal FireRed-style map connection when the player attempts
+        /// to step beyond an edge covered by a loaded destination map.
+        /// </summary>
+        private bool TryInterceptMapConnection(PlayerController movingPlayer, GridDirection direction)
+        {
+            if (activeMap == null || activeMap.CollisionMap == null || mapCatalog == null ||
+                !IsBoundaryExit(activeMap.CollisionMap, movingPlayer.CurrentCell, direction))
             {
-                ApplyTransition(request);
-            }
-            else
-            {
-                StartCoroutine(FadeAndApplyTransition(request));
+                return false;
             }
 
+            for (int index = 0; index < activeMap.Connections.Count; index++)
+            {
+                MapRuntimeConnection connection = activeMap.Connections[index];
+                if (connection == null || !DirectionMatches(connection.Direction, direction))
+                {
+                    continue;
+                }
+
+                if (!mapCatalog.TryResolve(connection.DestinationMapId, out MapRuntimeRoot destination) ||
+                    destination == null || destination.CollisionMap == null)
+                {
+                    return FailConnection("The destination is not registered in the runtime catalog: " +
+                        connection.DestinationMapId + ".");
+                }
+
+                if (!TryResolveConnectionArrival(
+                    activeMap.CollisionMap,
+                    destination.CollisionMap,
+                    movingPlayer.CurrentCell,
+                    connection,
+                    out Vector2Int arrivalCell))
+                {
+                    continue;
+                }
+
+                if (destination.CollisionMap.GetCollision(arrivalCell) != 0)
+                {
+                    return FailConnection("The arrival cell " + arrivalCell + " is blocked in destination " +
+                        connection.DestinationMapId + ".");
+                }
+
+                byte cellElevation = destination.CollisionMap.GetElevation(arrivalCell);
+                byte arrivalElevation = cellElevation == 0 || cellElevation == 15
+                    ? movingPlayer.Elevation
+                    : cellElevation;
+
+                string sourceMapId = activeMap.MapId;
+                if (!TryActivateMapImmediately(
+                    connection.DestinationMapId,
+                    arrivalCell,
+                    arrivalElevation,
+                    direction))
+                {
+                    return FailConnection("Could not activate destination " +
+                        connection.DestinationMapId + " at " + arrivalCell + ".");
+                }
+
+                lastFailure = null;
+                if (logConnectionDiagnostics)
+                {
+                    Debug.Log(
+                        "[MAP-CONNECTION] " + sourceMapId + " --" + connection.Direction +
+                        "--> " + connection.DestinationMapId + " arrival=" + arrivalCell +
+                        " offset=" + connection.Offset + ".",
+                        this);
+                }
+                return true;
+            }
+
+            if (logConnectionDiagnostics)
+            {
+                Debug.LogWarning(
+                    "[MAP-CONNECTION] No matching cardinal connection from " + activeMap.MapId +
+                    " at edge cell " + movingPlayer.CurrentCell + " moving " + direction +
+                    " (parsedConnections=" + activeMap.Connections.Count + ").",
+                    this);
+            }
+            return false;
+        }
+
+        private bool FailConnection(string reason)
+        {
+            lastFailure = "[MAP-CONNECTION] " + reason;
+            if (logConnectionDiagnostics) Debug.LogWarning(lastFailure, this);
             return true;
+        }
+
+        private static bool IsBoundaryExit(GridCollisionMap map, Vector2Int cell, GridDirection direction)
+        {
+            if (map == null || !map.IsInBounds(cell)) return false;
+            switch (direction)
+            {
+                case GridDirection.Down: return cell.y == 0;
+                case GridDirection.Up: return cell.y == map.Height - 1;
+                case GridDirection.Left: return cell.x == 0;
+                case GridDirection.Right: return cell.x == map.Width - 1;
+                default: return false;
+            }
+        }
+
+        private static bool DirectionMatches(MapRuntimeConnectionDirection connectionDirection, GridDirection movementDirection)
+        {
+            switch (connectionDirection)
+            {
+                case MapRuntimeConnectionDirection.South: return movementDirection == GridDirection.Down;
+                case MapRuntimeConnectionDirection.North: return movementDirection == GridDirection.Up;
+                case MapRuntimeConnectionDirection.West: return movementDirection == GridDirection.Left;
+                case MapRuntimeConnectionDirection.East: return movementDirection == GridDirection.Right;
+                default: return false;
+            }
+        }
+
+        private static bool TryResolveConnectionArrival(
+            GridCollisionMap source,
+            GridCollisionMap destination,
+            Vector2Int sourceCell,
+            MapRuntimeConnection connection,
+            out Vector2Int arrivalCell)
+        {
+            arrivalCell = sourceCell;
+            if (source == null || destination == null || connection == null)
+            {
+                return false;
+            }
+
+            switch (connection.Direction)
+            {
+                case MapRuntimeConnectionDirection.South:
+                    arrivalCell = new Vector2Int(sourceCell.x - connection.Offset, destination.Height - 1);
+                    break;
+
+                case MapRuntimeConnectionDirection.North:
+                    arrivalCell = new Vector2Int(sourceCell.x - connection.Offset, 0);
+                    break;
+
+                case MapRuntimeConnectionDirection.West:
+                    arrivalCell = new Vector2Int(
+                        destination.Width - 1,
+                        sourceCell.y + connection.Offset + (destination.Height - source.Height));
+                    break;
+
+                case MapRuntimeConnectionDirection.East:
+                    arrivalCell = new Vector2Int(
+                        0,
+                        sourceCell.y + connection.Offset + (destination.Height - source.Height));
+                    break;
+
+                default:
+                    return false;
+            }
+
+            return destination.IsInBounds(arrivalCell);
         }
 
         /// <summary>Synchronously follows one configured warp. Intended for deterministic tests and no-fade flows.</summary>

@@ -11,18 +11,44 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
     {
         public static DialogueCatalogDefinition Decode(RomReader reader, ImportReport report)
         {
+            return Decode(reader, report, null);
+        }
+
+        /// <summary>Decodes only circuits whose target-event map prefix is in the selected bundle.</summary>
+        public static DialogueCatalogDefinition Decode(RomReader reader, ImportReport report, IList<string> selectedMapIds)
+        {
             if (reader == null || report == null) throw new ArgumentNullException();
-            var dialogues = new List<DialogueDefinition>
+            var includePalletTown = IncludesMap(selectedMapIds, FireRedRomLayoutRev1.PalletTownMapId);
+            var includePlayersHouse = IncludesMap(selectedMapIds, FireRedRomLayoutRev1.PlayersHouse1FMapId);
+            var includeRivalsHouse = IncludesMap(selectedMapIds, FireRedRomLayoutRev1.RivalsHouseMapId);
+            var dialogues = new List<DialogueDefinition>();
+            if (includePalletTown)
             {
-                DecodeCircuit(reader, "dialogue_pallet_fat_man", FireRedRomLayoutRev1.PalletTownMapId + ":object:2", FireRedRomLayoutRev1.FatManDialogueScript, FireRedRomLayoutRev1.FatManDialogueText, FireRedRomLayoutRev1.FatManDialogueTextLength, DialoguePresentation.Npc, true),
-                DecodeCircuit(reader, "dialogue_rivals_house_town_map", FireRedRomLayoutRev1.RivalsHouseMapId + ":object:2", FireRedRomLayoutRev1.TownMapDialogueScript, FireRedRomLayoutRev1.TownMapDialogueText, FireRedRomLayoutRev1.TownMapDialogueTextLength, DialoguePresentation.Neutral, false)
-            };
-            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "No state profile is declared for Woman; her dialogue remains unsupported."));
-            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Professor Oak has no supported dialogue in the preview profile."));
-            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Mom requires a state profile; her dialogue remains unsupported."));
-            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Daisy has stateful specials and remains unsupported by the bounded dialogue decoder."));
-            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Info, "Parsed two whitelisted static dialogue circuits without executing ROM scripts."));
+                dialogues.Add(DecodeCircuit(reader, "dialogue_pallet_fat_man", FireRedRomLayoutRev1.PalletTownMapId + ":object:2", FireRedRomLayoutRev1.FatManDialogueScript, FireRedRomLayoutRev1.FatManDialogueText, FireRedRomLayoutRev1.FatManDialogueTextLength, DialoguePresentation.Npc, true));
+                report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "No state profile is declared for Woman; her dialogue remains unsupported."));
+                report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Professor Oak has no supported dialogue in the preview profile."));
+            }
+
+            if (includePlayersHouse) report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Mom requires a state profile; her dialogue remains unsupported."));
+            if (includeRivalsHouse)
+            {
+                dialogues.Add(DecodeCircuit(reader, "dialogue_rivals_house_town_map", FireRedRomLayoutRev1.RivalsHouseMapId + ":object:2", FireRedRomLayoutRev1.TownMapDialogueScript, FireRedRomLayoutRev1.TownMapDialogueText, FireRedRomLayoutRev1.TownMapDialogueTextLength, DialoguePresentation.Neutral, false));
+                report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Warning, "Daisy has stateful specials and remains unsupported by the bounded dialogue decoder."));
+            }
+
+            report.Add(new ParseDiagnostic("Dialogue", DiagnosticSeverity.Info, "Parsed " + dialogues.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " whitelisted static dialogue circuits for selected maps without executing ROM scripts."));
             return new DialogueCatalogDefinition(dialogues);
+        }
+
+        private static bool IncludesMap(IList<string> selectedMapIds, string mapId)
+        {
+            if (selectedMapIds == null) return true;
+            for (var index = 0; index < selectedMapIds.Count; index++)
+            {
+                if (string.Equals(selectedMapIds[index], mapId, StringComparison.Ordinal)) return true;
+            }
+
+            return false;
         }
 
         private static DialogueDefinition DecodeCircuit(RomReader reader, string id, string targetId, int scriptOffset, int expectedTextOffset, int expectedTextLength, DialoguePresentation presentation, bool facePlayer)

@@ -211,6 +211,48 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(sawOakWarning, Is.True);
         }
 
+        [Test, Explicit("Requires a locally owned supported ROM through RETRO_RPG_TEST_ROM.")]
+        public void PartialSelection_UsesCatalogClosureAndFiltersDialoguesAndEncounters()
+        {
+            var path = System.Environment.GetEnvironmentVariable("RETRO_RPG_TEST_ROM");
+            Assert.That(path, Is.Not.Null.And.Not.Empty, "Set RETRO_RPG_TEST_ROM before explicitly running this integration test.");
+            var parser = new FireRedMapBundleParser();
+
+            var pallet = parser.Parse(RomFile.Load(path), new[] { FireRedRomLayoutRev1.PalletTownMapId });
+            Assert.That(pallet.Succeeded, Is.True, DescribeDiagnostics(pallet.Report));
+            Assert.That(pallet.RequestedMapIds, Is.EqualTo(new[] { FireRedRomLayoutRev1.PalletTownMapId }));
+            Assert.That(pallet.ResolvedMapIds, Is.EqualTo(new[]
+            {
+                FireRedRomLayoutRev1.PalletTownMapId,
+                FireRedRomLayoutRev1.PlayersHouse1FMapId,
+                FireRedRomLayoutRev1.PlayersHouse2FMapId,
+                FireRedRomLayoutRev1.RivalsHouseMapId
+            }));
+            Assert.That(pallet.Bundle.Maps, Has.Count.EqualTo(4));
+            Assert.That(pallet.DialogueCatalog.Dialogues, Has.Count.EqualTo(2));
+            Assert.That(pallet.EncounterCatalog.Zones, Has.Count.EqualTo(0));
+
+            var route = parser.Parse(RomFile.Load(path), new[] { FireRedRomLayoutRev1.Route1MapId });
+            Assert.That(route.Succeeded, Is.True, DescribeDiagnostics(route.Report));
+            Assert.That(route.ResolvedMapIds, Is.EqualTo(new[] { FireRedRomLayoutRev1.Route1MapId }));
+            Assert.That(route.Bundle.Maps, Has.Count.EqualTo(1));
+            Assert.That(route.DialogueCatalog.Dialogues, Has.Count.EqualTo(0));
+            Assert.That(route.EncounterCatalog.Zones, Has.Count.EqualTo(1));
+
+            var multi = parser.Parse(RomFile.Load(path), new[] { FireRedRomLayoutRev1.Route1MapId, FireRedRomLayoutRev1.PalletTownMapId });
+            Assert.That(multi.Succeeded, Is.True, DescribeDiagnostics(multi.Report));
+            Assert.That(multi.ResolvedMapIds, Is.EqualTo(new[]
+            {
+                FireRedRomLayoutRev1.PalletTownMapId,
+                FireRedRomLayoutRev1.PlayersHouse1FMapId,
+                FireRedRomLayoutRev1.PlayersHouse2FMapId,
+                FireRedRomLayoutRev1.RivalsHouseMapId,
+                FireRedRomLayoutRev1.Route1MapId
+            }));
+            Assert.That(multi.DialogueCatalog.Dialogues, Has.Count.EqualTo(2));
+            Assert.That(multi.EncounterCatalog.Zones, Has.Count.EqualTo(1));
+        }
+
         private static string DescribeDiagnostics(RetroRPG.Core.ImportReport report)
         {
             var summary = new System.Text.StringBuilder();

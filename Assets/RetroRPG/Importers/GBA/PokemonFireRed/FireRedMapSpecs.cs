@@ -132,5 +132,15 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             Route1BackgroundEventCount,
             0,
             false);
+
+        /// <summary>Every map whose exact binary structure is currently audited for this importer.</summary>
+        public static readonly IReadOnlyList<FireRedMapSpec> AuditedMapSpecs = new ReadOnlyCollection<FireRedMapSpec>(new[]
+        {
+            SelectedMapSpecs[0],
+            SelectedMapSpecs[1],
+            SelectedMapSpecs[2],
+            SelectedMapSpecs[3],
+            Route1MapSpec
+        });
     }
 }

@@ -217,6 +217,43 @@ namespace RetroRPG.IR
         public bool IsBlocked => Collision != 0;
     }
 
+    public enum MapConnectionDirection
+    {
+        South = 1,
+        North = 2,
+        West = 3,
+        East = 4
+    }
+
+    /// <summary>Immutable cardinal edge connection normalized from a game's native map-connection table.</summary>
+    [Serializable]
+    public sealed class MapConnectionDefinition
+    {
+        public MapConnectionDefinition(MapConnectionDirection direction, int offset, string destinationMapId)
+        {
+            if (direction != MapConnectionDirection.South &&
+                direction != MapConnectionDirection.North &&
+                direction != MapConnectionDirection.West &&
+                direction != MapConnectionDirection.East)
+            {
+                throw new ArgumentOutOfRangeException(nameof(direction));
+            }
+
+            if (string.IsNullOrWhiteSpace(destinationMapId))
+            {
+                throw new ArgumentException("A connection destination map id is required.", nameof(destinationMapId));
+            }
+
+            Direction = direction;
+            Offset = offset;
+            DestinationMapId = destinationMapId;
+        }
+
+        public MapConnectionDirection Direction { get; }
+        public int Offset { get; }
+        public string DestinationMapId { get; }
+    }
+
     [Serializable]
     public sealed class MapDefinition
     {
@@ -249,6 +286,22 @@ namespace RetroRPG.IR
             IList<WarpDefinition> warps,
             IList<NpcDefinition> npcs,
             IList<StaticMapPropDefinition> props)
+            : this(id, name, width, height, cells, primaryTileset, secondaryTileset, warps, npcs, props, new MapConnectionDefinition[0])
+        {
+        }
+
+        public MapDefinition(
+            string id,
+            string name,
+            int width,
+            int height,
+            IList<MapCellDefinition> cells,
+            TilesetDefinition primaryTileset,
+            TilesetDefinition secondaryTileset,
+            IList<WarpDefinition> warps,
+            IList<NpcDefinition> npcs,
+            IList<StaticMapPropDefinition> props,
+            IList<MapConnectionDefinition> connections)
         {
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)) throw new ArgumentException("Map id and name are required.");
             if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
@@ -256,6 +309,7 @@ namespace RetroRPG.IR
             if (primaryTileset == null || secondaryTileset == null) throw new ArgumentNullException();
             if (warps == null) throw new ArgumentNullException(nameof(warps));
             if (npcs == null || props == null) throw new ArgumentNullException(npcs == null ? nameof(npcs) : nameof(props));
+            if (connections == null) throw new ArgumentNullException(nameof(connections));
 
             var warpIds = new HashSet<string>(StringComparer.Ordinal);
             var warpIndexes = new HashSet<int>();
@@ -293,6 +347,21 @@ namespace RetroRPG.IR
                 copiedProps.Add(prop);
             }
 
+            var copiedConnections = new List<MapConnectionDefinition>(connections.Count);
+            var connectionKeys = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < connections.Count; i++)
+            {
+                var connection = connections[i] ?? throw new ArgumentException("Map connections cannot contain null.", nameof(connections));
+                var key = ((int)connection.Direction).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + connection.Offset.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ":" + connection.DestinationMapId;
+                if (!connectionKeys.Add(key))
+                {
+                    throw new ArgumentException("Duplicate map connections are not allowed.", nameof(connections));
+                }
+                copiedConnections.Add(connection);
+            }
+
             Id = id;
             Name = name;
             Width = width;
@@ -303,6 +372,7 @@ namespace RetroRPG.IR
             Warps = new ReadOnlyCollection<WarpDefinition>(copiedWarps);
             Npcs = new ReadOnlyCollection<NpcDefinition>(copiedNpcs);
             Props = new ReadOnlyCollection<StaticMapPropDefinition>(copiedProps);
+            Connections = new ReadOnlyCollection<MapConnectionDefinition>(copiedConnections);
         }
 
         public string Id { get; }
@@ -315,6 +385,7 @@ namespace RetroRPG.IR
         public IReadOnlyList<WarpDefinition> Warps { get; }
         public IReadOnlyList<NpcDefinition> Npcs { get; }
         public IReadOnlyList<StaticMapPropDefinition> Props { get; }
+        public IReadOnlyList<MapConnectionDefinition> Connections { get; }
     }
 
     public enum NpcMovementPattern
@@ -473,7 +544,12 @@ namespace RetroRPG.IR
             for (var i = 0; i < maps.Count; i++)
             {
                 var map = maps[i] ?? throw new ArgumentException("Map bundles cannot contain null maps.", nameof(maps));
-                if (!mapsById.Add(map.Id, map)) throw new ArgumentException("Map ids must be unique within a bundle.", nameof(maps));
+                if (mapsById.ContainsKey(map.Id))
+                {
+                    throw new ArgumentException("Map ids must be unique within a bundle.", nameof(maps));
+                }
+
+                mapsById.Add(map.Id, map);
                 copiedMaps.Add(map);
             }
 
@@ -551,6 +627,18 @@ namespace RetroRPG.IR
                     }
 
                     if (!found) throw new ArgumentException("Warp destination index is not present in its destination map.", nameof(maps));
+                }
+
+                for (var connectionIndex = 0; connectionIndex < map.Connections.Count; connectionIndex++)
+                {
+                    var connection = map.Connections[connectionIndex];
+                    if (!mapsById.ContainsKey(connection.DestinationMapId) &&
+                        !externalDestinationMapIds.Contains(connection.DestinationMapId))
+                    {
+                        throw new ArgumentException(
+                            "Map connection destination is neither in the bundle nor explicitly external: " + connection.DestinationMapId,
+                            nameof(maps));
+                    }
                 }
             }
         }

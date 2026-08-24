@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using RetroRPG.IR;
+using RetroRPG.Importers.GBA.Common;
 using RetroRPG.Importers.GBA.PokemonFireRed;
 using RetroRPG.Runtime;
 using UnityEngine;
 using IrEncounterTableDefinition = RetroRPG.IR.EncounterTableDefinition;
 using RuntimeDialogueDefinition = RetroRPG.Runtime.DialogueDefinition;
 using RuntimeEncounterTableDefinition = RetroRPG.Runtime.EncounterTableDefinition;
+using RetroRPG.Core;
 
 namespace RetroRPG.Tests.EditMode
 {

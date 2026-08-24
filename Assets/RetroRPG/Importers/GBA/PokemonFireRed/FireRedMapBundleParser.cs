@@ -29,6 +29,16 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         }
 
         public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, DialogueCatalogDefinition dialogueCatalog, EncounterCatalogDefinition encounterCatalog, BattleContentCatalogDefinition battleContent, ImportReport report)
+            : this(bundle, playerSprite, objectSprites, dialogueCatalog, encounterCatalog, battleContent, null, report)
+        {
+        }
+
+        public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, DialogueCatalogDefinition dialogueCatalog, EncounterCatalogDefinition encounterCatalog, BattleContentCatalogDefinition battleContent, MapCatalogDefinition mapCatalog, ImportReport report)
+            : this(bundle, playerSprite, objectSprites, dialogueCatalog, encounterCatalog, battleContent, mapCatalog, null, null, report)
+        {
+        }
+
+        public FireRedMapBundleParseResult(MapBundleDefinition bundle, OverworldSpriteDefinition playerSprite, ObjectSpriteCatalogDefinition objectSprites, DialogueCatalogDefinition dialogueCatalog, EncounterCatalogDefinition encounterCatalog, BattleContentCatalogDefinition battleContent, MapCatalogDefinition mapCatalog, IList<string> requestedMapIds, IList<string> resolvedMapIds, ImportReport report)
         {
             Bundle = bundle;
             PlayerSprite = playerSprite;
@@ -36,6 +46,9 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             DialogueCatalog = dialogueCatalog;
             EncounterCatalog = encounterCatalog;
             BattleContent = battleContent;
+            MapCatalog = mapCatalog;
+            RequestedMapIds = CopyMapIds(requestedMapIds);
+            ResolvedMapIds = CopyMapIds(resolvedMapIds);
             Report = report ?? throw new ArgumentNullException(nameof(report));
         }
 
@@ -46,8 +59,29 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
         public DialogueCatalogDefinition DialogueCatalog { get; }
         public EncounterCatalogDefinition EncounterCatalog { get; }
         public BattleContentCatalogDefinition BattleContent { get; }
+        public MapCatalogDefinition MapCatalog { get; }
+        public IReadOnlyList<string> RequestedMapIds { get; }
+        public IReadOnlyList<string> ResolvedMapIds { get; }
         public ImportReport Report { get; }
         public bool Succeeded => Bundle != null && PlayerSprite != null && ObjectSprites != null && DialogueCatalog != null && EncounterCatalog != null && BattleContent != null && !Report.HasErrors;
+
+        private static IReadOnlyList<string> CopyMapIds(IList<string> ids)
+        {
+            var copied = new List<string>();
+            if (ids != null)
+            {
+                var unique = new HashSet<string>(StringComparer.Ordinal);
+                for (var index = 0; index < ids.Count; index++)
+                {
+                    var id = ids[index];
+                    if (string.IsNullOrWhiteSpace(id) || !unique.Add(id)) throw new ArgumentException("Map result ids must be non-blank and unique.", nameof(ids));
+                    copied.Add(id);
+                }
+            }
+
+            copied.Sort(StringComparer.Ordinal);
+            return new System.Collections.ObjectModel.ReadOnlyCollection<string>(copied);
+        }
     }
 
     /// <summary>Bounds-safe parser for the deliberately small Pallet Town transition bundle.</summary>
@@ -55,7 +89,22 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
     {
         private const string Stage = "PalletTownBundle";
 
+        /// <summary>Descriptors for every currently audited map. No ROM is read to enumerate them.</summary>
+        public MapCatalogDefinition MapCatalog => FireRedAuditedMapCatalog.Definition;
+
         public FireRedMapBundleParseResult Parse(RomFile rom)
+        {
+            return ParseInternal(rom, null);
+        }
+
+        /// <summary>Parses only requested audited maps plus their declared internal dependency closure.</summary>
+        public FireRedMapBundleParseResult Parse(RomFile rom, IList<string> selectedMapIds)
+        {
+            if (selectedMapIds == null) throw new ArgumentNullException(nameof(selectedMapIds));
+            return ParseInternal(rom, selectedMapIds);
+        }
+
+        private static FireRedMapBundleParseResult ParseInternal(RomFile rom, IList<string> selectedMapIds)
         {
             if (rom == null) throw new ArgumentNullException(nameof(rom));
             var report = new ImportReport(Stage);
@@ -69,7 +118,7 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                     return new FireRedMapBundleParseResult(null, null, report);
                 }
 
-                return ParseSupportedReader(rom.CreateReader(), report);
+                return ParseSupportedReader(rom.CreateReader(), report, selectedMapIds);
             }
             catch (RomReadException exception)
             {
@@ -78,6 +127,10 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             catch (InvalidOperationException exception)
             {
                 report.Add(new ParseDiagnostic("Format", DiagnosticSeverity.Error, exception.Message));
+            }
+            catch (ArgumentException exception)
+            {
+                report.Add(new ParseDiagnostic("MapSelection", DiagnosticSeverity.Error, exception.Message));
             }
             catch (OverflowException exception)
             {
@@ -87,33 +140,172 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             return new FireRedMapBundleParseResult(null, null, report);
         }
 
-        private static FireRedMapBundleParseResult ParseSupportedReader(RomReader reader, ImportReport report)
+        private static FireRedMapBundleParseResult ParseSupportedReader(RomReader reader, ImportReport report, IList<string> selectedMapIds)
         {
             try
             {
-                var tilesets = new Dictionary<string, TilesetDefinition>(StringComparer.Ordinal);
-                var maps = new List<MapDefinition>(FireRedRomLayoutRev1.SelectedMapSpecs.Count + 1);
-                for (var index = 0; index < FireRedRomLayoutRev1.SelectedMapSpecs.Count; index++)
+                // Keep the no-selection overload backward compatible with the original
+                // audited vertical slice. The Map Browser supplies an explicit selection
+                // and therefore uses ROM-backed discovery.
+                FireRedMapCatalogScanResult discovery = null;
+                MapCatalogDefinition mapCatalog;
+                List<MapImportDescriptorDefinition> descriptors;
+                List<string> requestedIds;
+
+                if (selectedMapIds == null)
                 {
-                    maps.Add(ParseMap(reader, FireRedRomLayoutRev1.SelectedMapSpecs[index], tilesets));
+                    mapCatalog = FireRedAuditedMapCatalog.Definition;
+                    descriptors = new List<MapImportDescriptorDefinition>(mapCatalog.Maps);
+                    requestedIds = MapIds(mapCatalog.Maps);
+                }
+                else
+                {
+                    discovery = FireRedMapCatalogScanner.ScanDetailed(reader);
+                    mapCatalog = discovery.Catalog;
+                    descriptors = new List<MapImportDescriptorDefinition>(mapCatalog.ResolveDependencyClosure(selectedMapIds));
+                    requestedIds = new List<string>(selectedMapIds);
                 }
 
-                var route1 = ParseMap(reader, FireRedRomLayoutRev1.Route1MapSpec, tilesets);
-                maps.Add(route1);
+                var tilesets = new Dictionary<string, TilesetDefinition>(StringComparer.Ordinal);
+                var maps = new List<MapDefinition>(descriptors.Count);
+                MapDefinition route1 = null;
+                var genericMapCount = 0;
+                var skippedGenericCount = 0;
 
-                var bundle = new MapBundleDefinition(maps, new[] { FireRedRomLayoutRev1.OakLabMapId });
+                for (var index = 0; index < descriptors.Count; index++)
+                {
+                    var descriptor = descriptors[index];
+                    FireRedMapSpec auditedSpec;
+                    MapDefinition map;
+                    if (TryGetAuditedSpec(descriptor.Id, out auditedSpec))
+                    {
+                        map = ParseMap(reader, auditedSpec, tilesets);
+                    }
+                    else
+                    {
+                        if (discovery == null || !discovery.TryGetSpec(descriptor.Id, out var discoveredSpec))
+                        {
+                            report.Add(new ParseDiagnostic("MapSupport", DiagnosticSeverity.Warning, "Skipped map without a discovered FireRed specification: " + descriptor.Id + "."));
+                            skippedGenericCount++;
+                            continue;
+                        }
+
+                        try
+                        {
+                            int placeholderTileCount;
+                            map = FireRedDiscoveredMapParser.Parse(reader, discoveredSpec, discovery, out placeholderTileCount);
+                            genericMapCount++;
+                            if (placeholderTileCount > 0)
+                            {
+                                report.Add(new ParseDiagnostic(
+                                    "MapSupport",
+                                    DiagnosticSeverity.Warning,
+                                    descriptor.Name + " uses "
+                                    + placeholderTileCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                    + " tile slot(s) not present in the base compressed tileset. Transparent placeholders were generated; these slots are likely supplied by tileset animation/callback data that the generic importer does not execute yet."));
+                            }
+                        }
+                        catch (RomReadException exception)
+                        {
+                            report.Add(new ParseDiagnostic(
+                                "MapSupport",
+                                DiagnosticSeverity.Warning,
+                                "Skipped " + descriptor.Name + " because the generic importer does not support one of its structures yet: " + exception.Message,
+                                exception.Offset,
+                                ToDiagnosticLength(exception.RequestedLength)));
+                            skippedGenericCount++;
+                            continue;
+                        }
+                        catch (InvalidOperationException exception)
+                        {
+                            report.Add(new ParseDiagnostic(
+                                "MapSupport",
+                                DiagnosticSeverity.Warning,
+                                "Skipped " + descriptor.Name + " because the generic importer does not support one of its structures yet: " + exception.Message));
+                            skippedGenericCount++;
+                            continue;
+                        }
+                    }
+
+                    if (discovery != null && discovery.TryGetSpec(map.Id, out var connectionSpec))
+                    {
+                        map = AttachConnections(
+                            map,
+                            FireRedMapConnectionParser.Parse(reader, connectionSpec, discovery));
+                    }
+
+                    maps.Add(map);
+                    if (map.Id == FireRedRomLayoutRev1.Route1MapId) route1 = map;
+                }
+
+                if (maps.Count == 0)
+                {
+                    throw new InvalidOperationException("None of the selected maps could be parsed by the current audited or generic import paths.");
+                }
+
+                var resolvedIds = MapIds(maps);
+                var externalDependencies = CollectExternalDestinations(maps);
+                var bundle = new MapBundleDefinition(maps, externalDependencies);
                 var playerSprite = PlayerRedNormalParser.Parse(reader);
                 var objectSprites = ObjectEventSpriteDecoder.Decode(reader);
-                var dialogues = FireRedDialogueDecoder.Decode(reader, report);
-                var encounters = FireRedRoute1EncounterParser.Parse(reader, route1);
+                var dialogues = FireRedDialogueDecoder.Decode(reader, report, resolvedIds);
+                var encounters = route1 == null
+                    ? new EncounterCatalogDefinition(new EncounterZoneDefinition[0], new EncounterTableDefinition[0])
+                    : FireRedRoute1EncounterParser.Parse(reader, route1);
                 var battleContent = FireRedBattleContentParser.Parse(reader);
-                report.Add(new ParseDiagnostic("MapBundle", DiagnosticSeverity.Info, "Parsed Pallet Town, three interior maps, and Route 1 (1,808 cells, 11 warp records).", FireRedRomLayoutRev1.PalletTownMapHeader, FireRedRomLayoutRev1.MapHeaderSize));
-                report.Add(new ParseDiagnostic("ObjectEvent", DiagnosticSeverity.Warning, "Route 1 object-event records were bounds-validated but intentionally omitted because no MVP 4 object whitelist is declared for them.", FireRedRomLayoutRev1.Route1Events, FireRedRomLayoutRev1.MapEventsSize));
-                report.Add(new ParseDiagnostic("Encounter", DiagnosticSeverity.Info, "Parsed the audited Route 1 land encounter zone (178 cells, 12 weighted slots).", FireRedRomLayoutRev1.Route1WildHeader, FireRedRomLayoutRev1.WildPokemonHeaderSize));
-                report.Add(new ParseDiagnostic("Warp", DiagnosticSeverity.Warning, "Oak's Lab is intentionally external to this bundle; its Pallet Town warp remains unresolved.", FireRedRomLayoutRev1.PalletTownEvents, FireRedRomLayoutRev1.MapEventsSize));
+
+                if (discovery != null)
+                {
+                    report.Add(new ParseDiagnostic(
+                        "Catalog",
+                        DiagnosticSeverity.Info,
+                        "Discovered " + discovery.Maps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " valid map headers across " + discovery.GroupCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " map groups."));
+                }
+
+                report.Add(new ParseDiagnostic(
+                    "MapSelection",
+                    DiagnosticSeverity.Info,
+                    "Resolved " + requestedIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " requested map ids to " + resolvedIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " selected maps."));
+                report.Add(new ParseDiagnostic(
+                    "MapBundle",
+                    DiagnosticSeverity.Info,
+                    "Parsed " + maps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " selected maps (" + CountCells(maps).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " cells, " + CountWarps(maps).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " warp records, " + CountConnections(maps).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " cardinal map connections)."));
+
+                if (genericMapCount > 0)
+                {
+                    report.Add(new ParseDiagnostic(
+                        "MapSupport",
+                        DiagnosticSeverity.Warning,
+                        genericMapCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " ROM-discovered map(s) were imported through the generic map/warp path. "
+                        + "Unknown object events and scripts are intentionally omitted until their semantics are supported."));
+                }
+                if (skippedGenericCount > 0)
+                {
+                    report.Add(new ParseDiagnostic(
+                        "MapSupport",
+                        DiagnosticSeverity.Warning,
+                        skippedGenericCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        + " selected discovered map(s) were skipped without aborting the rest of the import."));
+                }
+
+                if (route1 != null)
+                {
+                    report.Add(new ParseDiagnostic("ObjectEvent", DiagnosticSeverity.Warning, "Route 1 object-event records were bounds-validated but intentionally omitted because no MVP 4 object whitelist is declared for them.", FireRedRomLayoutRev1.Route1Events, FireRedRomLayoutRev1.MapEventsSize));
+                    report.Add(new ParseDiagnostic("Encounter", DiagnosticSeverity.Info, "Parsed the audited Route 1 land encounter zone (178 cells, 12 weighted slots).", FireRedRomLayoutRev1.Route1WildHeader, FireRedRomLayoutRev1.WildPokemonHeaderSize));
+                }
+
                 report.Add(new ParseDiagnostic("PlayerSprite", DiagnosticSeverity.Info, "Parsed the normal on-foot player sprite (9 frames, 8 animations).", FireRedRomLayoutRev1.PlayerRedNormalGraphicsInfo, FireRedRomLayoutRev1.ObjectEventGraphicsInfoSize));
                 report.Add(new ParseDiagnostic("BattleContent", DiagnosticSeverity.Info, "Parsed the audited battle-content whitelist (Bulbasaur, Pidgey, Rattata, and Tackle).", FireRedRomLayoutRev1.PokemonSpeciesInfoTable, FireRedRomLayoutRev1.PokemonSpeciesInfoRecordSize));
-                return new FireRedMapBundleParseResult(bundle, playerSprite, objectSprites, dialogues, encounters, battleContent, report);
+                return new FireRedMapBundleParseResult(bundle, playerSprite, objectSprites, dialogues, encounters, battleContent, mapCatalog, requestedIds, resolvedIds, report);
             }
             catch (RomReadException exception)
             {
@@ -123,12 +315,121 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
             {
                 report.Add(new ParseDiagnostic("Format", DiagnosticSeverity.Error, exception.Message));
             }
+            catch (ArgumentException exception)
+            {
+                report.Add(new ParseDiagnostic("MapSelection", DiagnosticSeverity.Error, exception.Message));
+            }
             catch (OverflowException exception)
             {
                 report.Add(new ParseDiagnostic("Safety", DiagnosticSeverity.Error, exception.Message));
             }
 
             return new FireRedMapBundleParseResult(null, null, report);
+        }
+
+        private static bool TryGetAuditedSpec(string mapId, out FireRedMapSpec spec)
+        {
+            for (var index = 0; index < FireRedRomLayoutRev1.AuditedMapSpecs.Count; index++)
+            {
+                var candidate = FireRedRomLayoutRev1.AuditedMapSpecs[index];
+                if (string.Equals(candidate.Id, mapId, StringComparison.Ordinal))
+                {
+                    spec = candidate;
+                    return true;
+                }
+            }
+
+            spec = null;
+            return false;
+        }
+
+        private static List<string> CollectExternalDestinations(IList<MapDefinition> maps)
+        {
+            var selected = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < maps.Count; index++) selected.Add(maps[index].Id);
+
+            var external = new HashSet<string>(StringComparer.Ordinal);
+            for (var mapIndex = 0; mapIndex < maps.Count; mapIndex++)
+            {
+                var map = maps[mapIndex];
+                for (var warpIndex = 0; warpIndex < map.Warps.Count; warpIndex++)
+                {
+                    var destination = map.Warps[warpIndex].DestinationMapId;
+                    if (!selected.Contains(destination)) external.Add(destination);
+                }
+
+                for (var connectionIndex = 0; connectionIndex < map.Connections.Count; connectionIndex++)
+                {
+                    var destination = map.Connections[connectionIndex].DestinationMapId;
+                    if (!selected.Contains(destination)) external.Add(destination);
+                }
+            }
+
+            var ordered = new List<string>(external);
+            ordered.Sort(StringComparer.Ordinal);
+            return ordered;
+        }
+
+        private static MapDefinition AttachConnections(
+            MapDefinition map,
+            IList<MapConnectionDefinition> connections)
+        {
+            return new MapDefinition(
+                map.Id,
+                map.Name,
+                map.Width,
+                map.Height,
+                new List<MapCellDefinition>(map.Cells),
+                map.PrimaryTileset,
+                map.SecondaryTileset,
+                new List<WarpDefinition>(map.Warps),
+                new List<NpcDefinition>(map.Npcs),
+                new List<StaticMapPropDefinition>(map.Props),
+                connections == null
+                    ? new List<MapConnectionDefinition>()
+                    : new List<MapConnectionDefinition>(connections));
+        }
+
+        private static int CountConnections(IList<MapDefinition> maps)
+        {
+            var count = 0;
+            for (var index = 0; index < maps.Count; index++) count = checked(count + maps[index].Connections.Count);
+            return count;
+        }
+
+        private static int CountCells(IList<MapDefinition> maps)
+        {
+            var count = 0;
+            for (var index = 0; index < maps.Count; index++) count = checked(count + maps[index].Cells.Count);
+            return count;
+        }
+
+        private static int CountWarps(IList<MapDefinition> maps)
+        {
+            var count = 0;
+            for (var index = 0; index < maps.Count; index++) count = checked(count + maps[index].Warps.Count);
+            return count;
+        }
+
+        private static bool Contains(IReadOnlyList<string> ids, string id)
+        {
+            for (var index = 0; index < ids.Count; index++) if (string.Equals(ids[index], id, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        private static List<string> MapIds(IReadOnlyList<MapImportDescriptorDefinition> descriptors)
+        {
+            var ids = new List<string>(descriptors.Count);
+            for (var index = 0; index < descriptors.Count; index++) ids.Add(descriptors[index].Id);
+            return ids;
+        }
+
+        private static List<string> MapIds(IList<MapDefinition> maps)
+        {
+            var ids = new List<string>(maps.Count);
+            for (var index = 0; index < maps.Count; index++) ids.Add(maps[index].Id);
+            ids.Sort(StringComparer.Ordinal);
+            return ids;
         }
 
         private static MapDefinition ParseMap(RomReader reader, FireRedMapSpec spec, IDictionary<string, TilesetDefinition> tilesets)
@@ -286,9 +587,9 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
 
         private static string ResolveDestinationMapId(int group, int number, int offset, RomReader reader)
         {
-            for (var i = 0; i < FireRedRomLayoutRev1.SelectedMapSpecs.Count; i++)
+            for (var i = 0; i < FireRedRomLayoutRev1.AuditedMapSpecs.Count; i++)
             {
-                var map = FireRedRomLayoutRev1.SelectedMapSpecs[i];
+                var map = FireRedRomLayoutRev1.AuditedMapSpecs[i];
                 if (map.MapGroup == group && map.MapNumber == number) return map.Id;
             }
 
@@ -355,7 +656,12 @@ namespace RetroRPG.Importers.GBA.PokemonFireRed
                 {
                     var offset = checked(spec.MetatilesOffset + (metatile * 16) + (subtile * 2));
                     var value = reader.ReadUInt16(offset);
-                    if ((value & 0x03FF) >= spec.TileStart + spec.TileCount) throw new RomReadException(spec.Id + " metatile references a tile outside its verified range.", offset, 2, reader.Length);
+                    // Tile ids are 10-bit indexes in the combined primary+secondary
+                    // tileset address space. A metatile from one bank may legitimately
+                    // reference a tile supplied by its companion bank, so validating
+                    // against this individual spec's TileStart/TileCount is too strict.
+                    // PalletTownAssetBuilder.ValidateMapContent performs the correct
+                    // map-level validation after both tilesets are combined.
                     subtiles.Add(FireRedMapEncoding.DecodeSubtile(value));
                 }
 

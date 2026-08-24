@@ -184,7 +184,7 @@ namespace RetroRPG.Tests.EditMode
 
         private static WarpDefinition CreateIrWarp(string id, int index, string destination, int destinationIndex)
         {
-            return new WarpDefinition(id, index, 0, 0, 0, destination, destinationIndex, WarpActivation.DoorNorth, SpriteDirection.Down);
+            return new WarpDefinition(id, index, 0, 0, 0, destination, destinationIndex, WarpActivation.DoorNorth, SpriteDirection.South);
         }
 
         private static TilesetDefinition CreateTileset()

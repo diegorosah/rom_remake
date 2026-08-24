@@ -40,6 +40,7 @@ namespace RetroRPG.Tests.EditMode
             Assert.That(found.FacePlayer, Is.True);
             Assert.Throws<ArgumentException>(() => new DialogueCatalogDefinition(new[] { first, CreateIrDialogue("other", "target-a", false) }));
             Assert.Throws<ArgumentException>(() => new DialogueToken(DialogueTokenKind.Glyph));
+            Assert.DoesNotThrow(() => new DialogueToken(DialogueTokenKind.Glyph, " "));
             Assert.Throws<ArgumentException>(() => new DialogueToken(DialogueTokenKind.Newline, "unexpected"));
             Assert.Throws<ArgumentException>(() => new DialoguePageDefinition(new DialogueToken[0]));
         }
