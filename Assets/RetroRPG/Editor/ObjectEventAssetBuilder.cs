@@ -132,10 +132,14 @@ namespace RetroRPG.Editor
                 var directory = ObjectRoot + "/" + SafeId(definition.Id);
                 Directory.CreateDirectory(ToAbsolutePath(directory));
                 var path = directory + "/frame_00.png";
-                WriteTexture(path, definition.Frames[0], definition.Palette, false, false);
-                ConfigureTexture(path, definition.Height);
-                owned.Add(path);
+                var changed = WriteTexture(path, definition.Frames[0], definition.Palette, false, false);
                 var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                if (changed || sprite == null)
+                {
+                    ConfigureTexture(path, definition.Height);
+                    sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                }
+                owned.Add(path);
                 if (sprite == null) throw new InvalidOperationException("Unity did not import generated static sprite " + path + ".");
                 statics.Add(definition.Id, sprite);
             }
@@ -237,10 +241,14 @@ namespace RetroRPG.Editor
                     var directory = ObjectRoot + "/" + SafeId(definition.Id);
                     Directory.CreateDirectory(ToAbsolutePath(directory));
                     var path = directory + "/" + key.StableName + ".png";
-                    WriteTexture(path, frameDefinitions[key.FrameIndex], definition.Palette, key.HorizontalFlip, key.VerticalFlip);
-                    ConfigureTexture(path, definition.Height);
-                    owned.Add(path);
+                    var changed = WriteTexture(path, frameDefinitions[key.FrameIndex], definition.Palette, key.HorizontalFlip, key.VerticalFlip);
                     var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    if (changed || sprite == null)
+                    {
+                        ConfigureTexture(path, definition.Height);
+                        sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    }
+                    owned.Add(path);
                     if (sprite == null) throw new InvalidOperationException("Unity did not import generated NPC sprite " + path + ".");
                     sprites.Add(key, sprite);
                 }
@@ -270,7 +278,7 @@ namespace RetroRPG.Editor
             return result;
         }
 
-        private static void WriteTexture(string assetPath, IndexedSpriteFrameDefinition frame, IReadOnlyList<Rgba32> palette, bool horizontalFlip, bool verticalFlip)
+        private static bool WriteTexture(string assetPath, IndexedSpriteFrameDefinition frame, IReadOnlyList<Rgba32> palette, bool horizontalFlip, bool verticalFlip)
         {
             var colors = new Color32[checked(frame.Width * frame.Height)];
             for (var y = 0; y < frame.Height; y++)
@@ -287,14 +295,48 @@ namespace RetroRPG.Editor
             var texture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, true);
             texture.SetPixels32(colors);
             texture.Apply(false, false);
-            File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+            var encoded = texture.EncodeToPNG();
             UnityEngine.Object.DestroyImmediate(texture);
+            return WriteBytesIfChanged(assetPath, encoded);
+        }
+
+        private static bool WriteBytesIfChanged(string assetPath, byte[] bytes)
+        {
+            var absolutePath = ToAbsolutePath(assetPath);
+            if (File.Exists(absolutePath))
+            {
+                var info = new FileInfo(absolutePath);
+                if (info.Length == bytes.Length)
+                {
+                    var existing = File.ReadAllBytes(absolutePath);
+                    if (existing.Length == bytes.Length)
+                    {
+                        var equal = true;
+                        for (var index = 0; index < bytes.Length; index++)
+                        {
+                            if (existing[index] == bytes[index]) continue;
+                            equal = false;
+                            break;
+                        }
+                        if (equal) return false;
+                    }
+                }
+            }
+
+            var directory = Path.GetDirectoryName(absolutePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllBytes(absolutePath, bytes);
+            return true;
         }
 
         private static void ConfigureTexture(string assetPath, int height)
         {
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
             var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null)
+            {
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+                importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            }
             if (importer == null) throw new InvalidOperationException("Generated object texture has no TextureImporter: " + assetPath);
             importer.textureType = TextureImporterType.Sprite;
             importer.spriteImportMode = SpriteImportMode.Single;

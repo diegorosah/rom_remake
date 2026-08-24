@@ -74,7 +74,8 @@ namespace RetroRPG.Editor
             EditorGUILayout.LabelField("Available maps", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Maps are discovered from the supported ROM's map-group/header tables. "
-                + "AUDITED maps keep the richer NPC/dialogue behavior already implemented; DISCOVERED maps currently import layout, collision and warps while unknown scripts/events are omitted safely.",
+                + "AUDITED maps keep the richer NPC/dialogue behavior already implemented; DISCOVERED maps currently import layout, collision and warps while unknown scripts/events are omitted safely. "
+                + "Fast incremental import is enabled: unchanged generated textures and Tile assets are reused instead of being force-reimported.",
                 MessageType.Info);
 
             filter = EditorGUILayout.TextField("Filter", filter ?? string.Empty);
@@ -193,6 +194,7 @@ namespace RetroRPG.Editor
 
         private void ImportSelected(IList<string> selected)
         {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 // Reopen and parse immediately before commit so a changed on-disk ROM
@@ -214,11 +216,14 @@ namespace RetroRPG.Editor
                 var successfulIds = new List<string>(parsed.ResolvedMapIds);
                 var result = MapAssetBuilder.Import(new MapAssetImportRequest(snapshot, successfulIds), ShowImportProgress);
                 var skipped = Math.Max(0, selected.Count - successfulIds.Count);
+                timer.Stop();
+                var elapsed = timer.Elapsed;
                 EditorUtility.DisplayDialog(
                     "Map import complete",
                     result.RequestedMapIds.Count + " map(s) imported"
                     + (skipped > 0 ? "; " + skipped + " selected map(s) were skipped as not yet supported" : string.Empty)
-                    + ". The generated scene is ready to open.",
+                    + ". Elapsed: " + elapsed.ToString(@"mm\:ss")
+                    + ". Fast incremental reuse is enabled. The generated scene is ready to open.",
                     "OK");
             }
             catch (OperationCanceledException exception)

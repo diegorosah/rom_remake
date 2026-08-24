@@ -47,7 +47,7 @@ namespace RetroRPG.Editor
         [Serializable]
         private sealed class ImportManifest
         {
-            public int schemaVersion = 3;
+            public int schemaVersion = 5;
             public string[] ownedAssets = Array.Empty<string>();
         }
 
@@ -468,23 +468,27 @@ namespace RetroRPG.Editor
             var reportJson = DeterministicJson.SerializeReport(report);
             ThrowIfCancelled(shouldCancel, "Preparing deterministic output", 0.32f);
 
-            Directory.CreateDirectory(ToAbsolutePath(OutputRoot));
-            Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Textures"));
-            Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Tiles"));
-            Directory.CreateDirectory(ToAbsolutePath(OutputRoot + "/Player"));
+            var createdAssetDirectories = false;
+            createdAssetDirectories |= EnsureDirectory(OutputRoot);
+            createdAssetDirectories |= EnsureDirectory(OutputRoot + "/Textures");
+            createdAssetDirectories |= EnsureDirectory(OutputRoot + "/Tiles");
+            createdAssetDirectories |= EnsureDirectory(OutputRoot + "/Player");
             for (var contextIndex = 0; contextIndex < contexts.Count; contextIndex++)
             {
-                contexts[contextIndex].EnsureAssetDirectories();
+                createdAssetDirectories |= contexts[contextIndex].EnsureAssetDirectories();
             }
-            // Unity must learn about any newly-created map-specific folders before
-            // CreateAsset writes stable Tile assets into them.
-            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            // A full AssetDatabase refresh is expensive once thousands of generated
+            // files exist. It is only required when this import created new folders.
+            if (createdAssetDirectories)
+            {
+                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+            }
             var priorManifest = LoadManifest();
             var owned = new SortedSet<string>(StringComparer.Ordinal);
             try
             {
-                WriteText(IrPath, irJson);
-                WriteText(ReportPath, reportJson);
+                ImportTextIfChanged(IrPath, irJson);
+                ImportTextIfChanged(ReportPath, reportJson);
                 owned.Add(IrPath);
                 owned.Add(ReportPath);
 
@@ -497,10 +501,9 @@ namespace RetroRPG.Editor
                 var battleSprites = battleContent == null ? null : WriteBattleSprites(battleContent, owned);
                 CreateScene(contexts, objectAssets, dialogueCatalog, encounterCatalog, battleContent, battleSprites, owned);
                 owned.Add(ManifestPath);
-                WriteText(ManifestPath, JsonUtility.ToJson(new ImportManifest { schemaVersion = 4, ownedAssets = ToArray(owned) }, true) + "\n");
+                ImportTextIfChanged(ManifestPath, JsonUtility.ToJson(new ImportManifest { schemaVersion = 5, ownedAssets = ToArray(owned) }, true) + "\n");
                 RemoveStaleOwnedAssets(priorManifest, owned);
                 AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             }
             finally
             {
@@ -828,12 +831,20 @@ namespace RetroRPG.Editor
                 var safeId = source.CreatureId.Replace(':', '_').Replace('/', '_').Replace('\\', '_');
                 var frontPath = root + "/" + safeId + "_front.png";
                 var backPath = root + "/" + safeId + "_back.png";
-                WriteBattleTexture(frontPath, source.Front, source.Palette);
-                WriteBattleTexture(backPath, source.Back, source.Palette);
-                ConfigureBattleTexture(frontPath);
-                ConfigureBattleTexture(backPath);
+                var frontChanged = WriteBattleTexture(frontPath, source.Front, source.Palette);
+                var backChanged = WriteBattleTexture(backPath, source.Back, source.Palette);
                 var front = AssetDatabase.LoadAssetAtPath<Sprite>(frontPath);
                 var back = AssetDatabase.LoadAssetAtPath<Sprite>(backPath);
+                if (frontChanged || front == null)
+                {
+                    ConfigureBattleTexture(frontPath);
+                    front = AssetDatabase.LoadAssetAtPath<Sprite>(frontPath);
+                }
+                if (backChanged || back == null)
+                {
+                    ConfigureBattleTexture(backPath);
+                    back = AssetDatabase.LoadAssetAtPath<Sprite>(backPath);
+                }
                 if (front == null || back == null) throw new InvalidOperationException("Generated battle sprites could not be loaded.");
                 var entry = new ClassicBattleSpriteEntry();
                 entry.Configure(source.CreatureId, front, back);
@@ -844,7 +855,7 @@ namespace RetroRPG.Editor
             return result;
         }
 
-        private static void WriteBattleTexture(string assetPath, IndexedSpriteFrameDefinition frame, IReadOnlyList<Rgba32> palette)
+        private static bool WriteBattleTexture(string assetPath, IndexedSpriteFrameDefinition frame, IReadOnlyList<Rgba32> palette)
         {
             var colors = new Color32[checked(frame.Width * frame.Height)];
             for (var y = 0; y < frame.Height; y++)
@@ -861,14 +872,19 @@ namespace RetroRPG.Editor
             var texture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, true);
             texture.SetPixels32(colors);
             texture.Apply(false, false);
-            File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+            var encoded = texture.EncodeToPNG();
             UnityEngine.Object.DestroyImmediate(texture);
+            return WriteBytesIfChanged(assetPath, encoded);
         }
 
         private static void ConfigureBattleTexture(string assetPath)
         {
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
             var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            if (importer == null)
+            {
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+                importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            }
             if (importer == null) throw new InvalidOperationException("Generated battle texture has no TextureImporter: " + assetPath);
             importer.textureType = TextureImporterType.Sprite;
             importer.spriteImportMode = SpriteImportMode.Single;
@@ -1417,9 +1433,57 @@ namespace RetroRPG.Editor
             if (shouldCancel != null && shouldCancel(stage, progress)) throw new OperationCanceledException("Pallet Town import cancelled before generated assets were changed.");
         }
 
-        private static void WriteText(string assetPath, string text)
+        private static void ImportTextIfChanged(string assetPath, string text)
         {
-            File.WriteAllText(ToAbsolutePath(assetPath), text, new UTF8Encoding(false));
+            var absolutePath = ToAbsolutePath(assetPath);
+            var changed = true;
+            if (File.Exists(absolutePath))
+            {
+                var existing = File.ReadAllText(absolutePath, Encoding.UTF8);
+                changed = !string.Equals(existing, text, StringComparison.Ordinal);
+            }
+
+            if (!changed) return;
+            File.WriteAllText(absolutePath, text, new UTF8Encoding(false));
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        private static bool EnsureDirectory(string assetPath)
+        {
+            var absolutePath = ToAbsolutePath(assetPath);
+            if (Directory.Exists(absolutePath)) return false;
+            Directory.CreateDirectory(absolutePath);
+            return true;
+        }
+
+        private static bool WriteBytesIfChanged(string assetPath, byte[] bytes)
+        {
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            var absolutePath = ToAbsolutePath(assetPath);
+            if (File.Exists(absolutePath))
+            {
+                var info = new FileInfo(absolutePath);
+                if (info.Length == bytes.Length)
+                {
+                    var existing = File.ReadAllBytes(absolutePath);
+                    if (existing.Length == bytes.Length)
+                    {
+                        var equal = true;
+                        for (var index = 0; index < bytes.Length; index++)
+                        {
+                            if (existing[index] == bytes[index]) continue;
+                            equal = false;
+                            break;
+                        }
+                        if (equal) return false;
+                    }
+                }
+            }
+
+            var directory = Path.GetDirectoryName(absolutePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllBytes(absolutePath, bytes);
+            return true;
         }
 
         private static string ToAbsolutePath(string assetPath)
@@ -1574,10 +1638,13 @@ namespace RetroRPG.Editor
                 }
             }
 
-            public void EnsureAssetDirectories()
+            public bool EnsureAssetDirectories()
             {
-                Directory.CreateDirectory(ToAbsolutePath(AssetRoot + "/Textures"));
-                Directory.CreateDirectory(ToAbsolutePath(AssetRoot + "/Tiles"));
+                var created = false;
+                created |= EnsureDirectory(AssetRoot + "/Textures");
+                created |= EnsureDirectory(AssetRoot + "/Tiles");
+                created |= EnsureDirectory(AssetRoot + "/Player");
+                return created;
             }
 
             public void WriteTexturesAndTiles(ISet<string> owned, Func<string, float, bool> shouldCancel)
@@ -1607,10 +1674,14 @@ namespace RetroRPG.Editor
                 {
                     var key = orderedKeys[keyIndex];
                     var path = AssetRoot + "/Player/" + key.StableName + ".png";
-                    WritePlayerTexture(path, playerFrames[key.FrameIndex], PlayerSprite.Palette, key);
-                    ConfigureTextureImporter(path, true);
-                    owned.Add(path);
+                    var changed = WritePlayerTexture(path, playerFrames[key.FrameIndex], PlayerSprite.Palette, key);
                     var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    if (changed || sprite == null)
+                    {
+                        ConfigureTextureImporter(path, true);
+                        sprite = AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                    }
+                    owned.Add(path);
                     if (sprite == null)
                     {
                         throw new InvalidOperationException("Unity did not import generated player sprite " + path + ".");
@@ -1680,6 +1751,13 @@ namespace RetroRPG.Editor
 
             public void FillTilemaps(Tilemap bottom, Tilemap middle, Tilemap top)
             {
+                var width = checked(Map.Width * 2);
+                var height = checked(Map.Height * 2);
+                var count = checked(width * height);
+                var bottomTiles = new TileBase[count];
+                var middleTiles = new TileBase[count];
+                var topTiles = new TileBase[count];
+
                 for (var cellIndex = 0; cellIndex < Map.Cells.Count; cellIndex++)
                 {
                     var cell = Map.Cells[cellIndex];
@@ -1689,17 +1767,25 @@ namespace RetroRPG.Editor
                     for (var plane = 0; plane < 2; plane++)
                     {
                         var layer = plane == 0 ? metatile.LayerRoute.FirstPlane : metatile.LayerRoute.SecondPlane;
-                        var target = layer == RenderLayer.Bottom ? bottom : layer == RenderLayer.Middle ? middle : top;
+                        var target = layer == RenderLayer.Bottom ? bottomTiles : layer == RenderLayer.Middle ? middleTiles : topTiles;
                         for (var local = 0; local < 4; local++)
                         {
                             var subtile = metatile.Subtiles[(plane * 4) + local];
                             var key = new TileKey(subtile.TileIndex, subtile.PaletteIndex, subtile.HorizontalFlip, subtile.VerticalFlip);
                             var x = (mapX * 2) + (local % 2);
                             var y = ((Map.Height - 1 - mapY) * 2) + (1 - (local / 2));
-                            target.SetTile(new Vector3Int(x, y, 0), unityTiles[key]);
+                            target[(y * width) + x] = unityTiles[key];
                         }
                     }
                 }
+
+                var bounds = new BoundsInt(0, 0, 0, width, height, 1);
+                bottom.ClearAllTiles();
+                middle.ClearAllTiles();
+                top.ClearAllTiles();
+                bottom.SetTilesBlock(bounds, bottomTiles);
+                middle.SetTilesBlock(bounds, middleTiles);
+                top.SetTilesBlock(bounds, topTiles);
             }
 
             private Sprite[] CreateSprites(TileKey key, TileAnimationDefinition animation, ISet<string> owned)
@@ -1710,10 +1796,14 @@ namespace RetroRPG.Editor
                 {
                     var suffix = sources.Count == 1 ? string.Empty : "_frame_" + frame.ToString("D2", CultureInfo.InvariantCulture);
                     var texturePath = AssetRoot + "/Textures/" + key.StableName + suffix + ".png";
-                    WriteTexture(texturePath, sources[frame], palettes[key.PaletteIndex], key);
-                    ConfigureTextureImporter(texturePath);
-                    owned.Add(texturePath);
+                    var changed = WriteTexture(texturePath, sources[frame], palettes[key.PaletteIndex], key);
                     result[frame] = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+                    if (changed || result[frame] == null)
+                    {
+                        ConfigureTextureImporter(texturePath);
+                        result[frame] = AssetDatabase.LoadAssetAtPath<Sprite>(texturePath);
+                    }
+                    owned.Add(texturePath);
                     if (result[frame] == null) throw new InvalidOperationException("Unity did not import generated sprite " + texturePath + ".");
                 }
                 return result;
@@ -1732,9 +1822,28 @@ namespace RetroRPG.Editor
                         if (existing != null) AssetDatabase.DeleteAsset(path);
                         animated = ScriptableObject.CreateInstance<DeterministicAnimatedTile>();
                         AssetDatabase.CreateAsset(animated, path);
+                        animated.Configure(frames, PixelTicksPerSecond / animation.DurationTicks);
+                        EditorUtility.SetDirty(animated);
                     }
-                    animated.Configure(frames, PixelTicksPerSecond / animation.DurationTicks);
-                    EditorUtility.SetDirty(animated);
+                    else
+                    {
+                        var expectedFramesPerSecond = PixelTicksPerSecond / animation.DurationTicks;
+                        var differs = animated.FrameCount != frames.Length || !Mathf.Approximately(animated.FramesPerSecond, expectedFramesPerSecond);
+                        if (!differs)
+                        {
+                            for (var frameIndex = 0; frameIndex < frames.Length; frameIndex++)
+                            {
+                                if (animated.GetFrame(frameIndex) == frames[frameIndex]) continue;
+                                differs = true;
+                                break;
+                            }
+                        }
+                        if (differs)
+                        {
+                            animated.Configure(frames, expectedFramesPerSecond);
+                            EditorUtility.SetDirty(animated);
+                        }
+                    }
                     owned.Add(path);
                     return animated;
                 }
@@ -1745,11 +1854,18 @@ namespace RetroRPG.Editor
                     if (existing != null) AssetDatabase.DeleteAsset(path);
                     tile = ScriptableObject.CreateInstance<Tile>();
                     AssetDatabase.CreateAsset(tile, path);
+                    tile.sprite = frames[0];
+                    tile.colliderType = Tile.ColliderType.None;
+                    tile.flags = TileFlags.LockColor | TileFlags.LockTransform;
+                    EditorUtility.SetDirty(tile);
                 }
-                tile.sprite = frames[0];
-                tile.colliderType = Tile.ColliderType.None;
-                tile.flags = TileFlags.LockColor | TileFlags.LockTransform;
-                EditorUtility.SetDirty(tile);
+                else if (tile.sprite != frames[0] || tile.colliderType != Tile.ColliderType.None || tile.flags != (TileFlags.LockColor | TileFlags.LockTransform))
+                {
+                    tile.sprite = frames[0];
+                    tile.colliderType = Tile.ColliderType.None;
+                    tile.flags = TileFlags.LockColor | TileFlags.LockTransform;
+                    EditorUtility.SetDirty(tile);
+                }
                 owned.Add(path);
                 return tile;
             }
@@ -1839,7 +1955,7 @@ namespace RetroRPG.Editor
                 }
             }
 
-            private static void WriteTexture(string assetPath, IndexedTileDefinition tile, PaletteDefinition palette, TileKey key)
+            private static bool WriteTexture(string assetPath, IndexedTileDefinition tile, PaletteDefinition palette, TileKey key)
             {
                 var colors = new Color32[IndexedTileDefinition.PixelCount];
                 for (var y = 0; y < IndexedTileDefinition.Height; y++)
@@ -1864,13 +1980,12 @@ namespace RetroRPG.Editor
                 var texture = new Texture2D(IndexedTileDefinition.Width, IndexedTileDefinition.Height, TextureFormat.RGBA32, false, true);
                 texture.SetPixels32(colors);
                 texture.Apply(false, false);
-                var directory = Path.GetDirectoryName(ToAbsolutePath(assetPath));
-                if (!Directory.Exists(directory)) Directory.CreateDirectory(directory);
-                File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+                var encoded = texture.EncodeToPNG();
                 UnityEngine.Object.DestroyImmediate(texture);
+                return WriteBytesIfChanged(assetPath, encoded);
             }
 
-            private static void WritePlayerTexture(
+            private static bool WritePlayerTexture(
                 string assetPath,
                 IndexedSpriteFrameDefinition frame,
                 IReadOnlyList<Rgba32> palette,
@@ -1896,14 +2011,19 @@ namespace RetroRPG.Editor
                 var texture = new Texture2D(frame.Width, frame.Height, TextureFormat.RGBA32, false, true);
                 texture.SetPixels32(colors);
                 texture.Apply(false, false);
-                File.WriteAllBytes(ToAbsolutePath(assetPath), texture.EncodeToPNG());
+                var encoded = texture.EncodeToPNG();
                 UnityEngine.Object.DestroyImmediate(texture);
+                return WriteBytesIfChanged(assetPath, encoded);
             }
 
             private static void ConfigureTextureImporter(string assetPath, bool playerSprite = false)
             {
-                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                 var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+                if (importer == null)
+                {
+                    AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+                    importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+                }
                 if (importer == null) throw new InvalidOperationException("Generated texture has no TextureImporter: " + assetPath);
                 importer.textureType = TextureImporterType.Sprite;
                 importer.spriteImportMode = SpriteImportMode.Single;
